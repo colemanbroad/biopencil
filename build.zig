@@ -24,6 +24,6 @@ pub fn build(b: *Builder) void {
         exe.addIncludeDir("/usr/local/include/SDL2/");
         exe.addLibPath("/usr/local/lib");
         exe.linkSystemLibrary("SDL2");
-
     }
+    
 }

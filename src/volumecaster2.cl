@@ -186,7 +186,8 @@ __kernel void max_project_float(
                   __global float *d_alpha_output, // same       "__global" mem so must be buffers
                   __global float *d_depth_output, // same       "__global" mem so must be buffers
                   uint Nx, 
-                  uint Ny
+                  uint Ny,
+                  float view_angle
                   )
 {
 
@@ -215,7 +216,8 @@ __kernel void max_project_float(
   // float _invP[16] = {1,0,0,0,  0,1,0,0,  0,0,1,0,  0,0,0,1}; 
 
 
-  float _invP[16]={0}; mat4_perspective(60, 1., 0.8, 40, &_invP);
+  float _invP[16]={0}; mat4_perspective(60, 1., view_angle, 40, &_invP);
+  // float _invP[16]={0}; mat4_perspective(60, 1., 0.8, 40, &_invP);
 
   // python
   // set_modelView(dot(mat4_translate(0,0,-7),mat4_scale(.7,.7,.7)))
@@ -281,6 +283,10 @@ __kernel void max_project_float(
   float tnear, tfar;
   int hit = intersectBox(orig, direc, boxMin, boxMax, &tnear, &tfar);
 
+  // if ((x==150) && (y==150)) {
+  //   printf("view_angle : %.3f \n", view_angle);
+  // }
+
   if ((x==150 || x==200|| x==250) && (y==150 || y==200 || y==250)) {
     //printf("x,y,orig0: [%d %d] .... %0.2f %0.2f %0.2f \n", x, y , orig0.x, orig0.y, orig0.z);
     //printf("orig: %.3f %.3f %.3f \n", orig.x , orig.y , orig.z, orig.w);
@@ -314,15 +320,15 @@ __kernel void max_project_float(
 
   // orig += currentPart*dt*direc;
 
-  if ((x==150 || x==200|| x==250) && (y==150 || y==200 || y==250)) {
-    // printf("pos is: %0.2f %0.2f %0.2f \n", pos.x , pos.y, pos.z);
-    // printf("cumsum = %f \n", cumsum);
-    printf("orig is: %0.2f %0.2f %0.2f \n", orig.x , orig.y, orig.z);
-    printf("direc is: %0.2f %0.2f %0.2f \n", direc.x , direc.y, direc.z);
-    printf("reducedSteps = %f \n", reducedSteps);
-    // printf("currentPart = %f \n", currentPart);
-    printf("dt = %f \n", dt);
-  }      
+  // if ((x==150 || x==200|| x==250) && (y==150 || y==200 || y==250)) {
+  //   // printf("pos is: %0.2f %0.2f %0.2f \n", pos.x , pos.y, pos.z);
+  //   // printf("cumsum = %f \n", cumsum);
+  //   printf("orig is: %0.2f %0.2f %0.2f \n", orig.x , orig.y, orig.z);
+  //   printf("direc is: %0.2f %0.2f %0.2f \n", direc.x , direc.y, direc.z);
+  //   printf("reducedSteps = %f \n", reducedSteps);
+  //   // printf("currentPart = %f \n", currentPart);
+  //   printf("dt = %f \n", dt);
+  // }      
 
 
   // dither the original
@@ -330,9 +336,9 @@ __kernel void max_project_float(
   // printf("x,y,rand = %d %d %d \n", x, y , random(x*93939393,y*383838)%100);
   // orig += dt*random(entropy+x,entropy+y)*direc;
   // TODO: how to properly implement dither? Is dither just to prevent aliasing?
-  float jitterx = (random(x*93939393,y*383837)%100) / 100.0 / Nx * 3.0;
-  float jittery = (random(x*23942347,y*294833)%100) / 100.0 / Ny * 3.0;
-  orig += (float4) {jitterx,jittery,0,0};
+  // float jitterx = (random(x*93939393,y*383837)%100) / 100.0 / Nx * 3.0;
+  // float jittery = (random(x*23942347,y*294833)%100) / 100.0 / Ny * 3.0;
+  // orig += (float4) {jitterx,jittery,0,0};
 
   float4 delta_pos = .5f*dt*direc;
   float4 pos = 0.5f *(1.f + orig + tnear*direc);
