@@ -22,6 +22,12 @@ const cc = struct {
 
 const cl = cc.cl;
 
+
+
+///
+///  BEGIN OpenCL Helpers
+///
+
 pub fn testForCLError(val: cl.cl_int) CLERROR!void {
     const maybeErr = switch (val) {
         0 => cl.CL_SUCCESS,
@@ -309,16 +315,18 @@ pub const DevCtxQueProg = struct {
     }
 };
 
-pub fn Kernel(comptime n: u8) type {
+pub fn Kernel(
+    comptime _kernName: []const u8,
+    comptime _argtype: []const u8,
+) type {
     return struct {
-        const nargs = n;
         const Self = @This();
 
-        kernel: cl.cl_kernel,
-        buffers: [n]cl.cl_mem,
+        const kernName: []const u8 = _kernName;
+        const argtype: []const u8 = _argtype;
 
-        // nproc_fixed: [3]?usize = .{ null, null, null },
-        // proc_count: u2,
+        kernel: cl.cl_kernel,
+        buffers: [argtype.len]cl.cl_mem,
 
         /// Create a kernel, then comptime loop over each argument and do:
         /// - create a cl_mem buffer . add it to ArrayList container
@@ -330,9 +338,7 @@ pub fn Kernel(comptime n: u8) type {
         /// - clean up buffer memory
         pub fn init(
             dcqp: DevCtxQueProg,
-            comptime kernName: []const u8,
             args: anytype,
-            comptime argtype: []const u8,
         ) !Self {
 
             // reuse errCode variable for each OpenCL call
@@ -386,7 +392,6 @@ pub fn Kernel(comptime n: u8) type {
             var res = .{
                 .kernel = kernel,
                 .buffers = buffers,
-                // .proc_count = nproc.len,
             };
 
             return res;
@@ -399,7 +404,6 @@ pub fn Kernel(comptime n: u8) type {
             self: Self,
             dcqp: DevCtxQueProg,
             args: anytype,
-            comptime argtype: []const u8,
         ) !void {
             var errCode: cl.cl_int = undefined;
 
@@ -441,7 +445,6 @@ pub fn Kernel(comptime n: u8) type {
             self: Self,
             dcqp: DevCtxQueProg,
             args: anytype,
-            comptime argtype: []const u8,
             nproc: []const usize,
         ) !void {
             // var local_item_size: usize = 64;
@@ -503,7 +506,8 @@ pub fn Kernel(comptime n: u8) type {
         }
 
         pub fn deinit(self: Self) void {
-            for (self.buffers) |b| {
+            for (self.buffers) |b, i| {
+                if (argtype[i] == 'x') continue;
                 _ = cl.clReleaseMemObject(b); // TODO: what happens to defer inside of inline for ?
             }
             _ = cl.clReleaseKernel(self.kernel);
@@ -573,94 +577,11 @@ pub fn img2CLImg(
     return climg;
 }
 
-/// Deprecated
-pub fn renderImg(al: std.mem.Allocator, testtifname: []const u8) !Img2D(f32) {
 
-    // temporary stack allocator
-    // var page = std.heap.page_allocator;
-    var arena = std.heap.ArenaAllocator.init(al);
-    defer arena.deinit();
-    const temp = arena.allocator();
+///
+///  BEGIN SDL2 Helpers
+///
 
-    // var alo = std.testing.allocator;
-    const t1 = std.time.milliTimestamp();
-
-    // define allocator and .CL files
-    const files = &[_][]const u8{
-        "volumecaster2.cl",
-    };
-    const t2 = std.time.milliTimestamp();
-
-    // setup OpenCL Contex Queue
-    var dcqp = try DevCtxQueProg.init(temp, files);
-    defer dcqp.deinit();
-    const t3 = std.time.milliTimestamp();
-
-    // Load TIFF image
-    // const testtifname = "/Users/broaddus/Desktop/mpi-remote/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01/t100.tif";
-    const img = try readTIFF3D(temp, testtifname);
-    const t4 = std.time.milliTimestamp();
-
-    // Move TIFF image into standard buffer
-    const grey = try Img3D(f32).init(img.nx, img.ny, img.nz);
-    for (grey.img) |*v, i| {
-        v.* = @intToFloat(f32, img.img[i][0]) / 255;
-    }
-    const t5 = std.time.milliTimestamp();
-
-    // Run max projection kernel
-    var img_cl = try img2CLImg(grey, dcqp);
-    var nx: u32 = grey.nx * 1;
-    var ny: u32 = grey.ny * 1;
-    var d_output = try al.alloc(f32, nx * ny);
-    var d_alpha_output = try temp.alloc(f32, nx * ny);
-    var d_depth_output = try temp.alloc(f32, nx * ny);
-    var view_angle: f32 = 0;
-    const args = .{
-        img_cl,
-        d_output,
-        d_alpha_output,
-        d_depth_output,
-        nx,
-        ny,
-        view_angle,
-    };
-    try dcqp.callKernel(
-        "max_project_float",
-        args,
-        "xrrrxxx",
-        &.{ nx, ny },
-    );
-    const t6 = std.time.milliTimestamp();
-
-    // Save max projection result
-    try im.saveF32AsTGAGreyNormed(d_output, @intCast(u16, ny), @intCast(u16, nx), "output/t100_rendered.tga");
-    const t7 = std.time.milliTimestamp();
-
-    print(
-        \\Timings : 
-        \\ t2-t1 = {} 
-        \\ t3-t2 = {} 
-        \\ t4-t3 = {} 
-        \\ t5-t4 = {} 
-        \\ t6-t5 = {} 
-        \\ t7-t6 = {} 
-        \\
-    , .{
-        t2 - t1,
-        t3 - t2,
-        t4 - t3,
-        t5 - t4,
-        t6 - t5,
-        t7 - t6,
-    });
-
-    return Img2D(f32){
-        .img = d_output,
-        .nx = nx,
-        .ny = ny,
-    };
-}
 
 const SDL_WINDOWPOS_UNDEFINED = @bitCast(c_int, cc.SDL_WINDOWPOS_UNDEFINED_MASK);
 
@@ -682,192 +603,11 @@ fn setPixel(surf: *cc.SDL_Surface, x: c_int, y: c_int, pixel: u32) void {
     @intToPtr(*u32, target_pixel).* = val;
 }
 
-pub fn main() !u8 {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    // temporary stack allocator
-    // var page = std.heap.page_allocator;
-    var arena = std.heap.ArenaAllocator.init(gpa.allocator());
-    defer arena.deinit();
-    const temp = arena.allocator();
 
-    const testtifname = "/Users/broaddus/Desktop/mpi-remote/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01/t100.tif";
+///
+///  BEGIN TIFFIO Helpers
+///
 
-    // var alo = std.testing.allocator;
-    const t1 = std.time.milliTimestamp();
-
-    // define allocator and .CL files
-    const files = &[_][]const u8{
-        "volumecaster2.cl",
-    };
-    const t2 = std.time.milliTimestamp();
-
-    // setup OpenCL Contex Queue
-    var dcqp = try DevCtxQueProg.init(temp, files);
-    const t3 = std.time.milliTimestamp();
-
-    // Load TIFF image
-    // const testtifname = "/Users/broaddus/Desktop/mpi-remote/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01/t100.tif";
-    const img = try readTIFF3D(temp, testtifname);
-    const t4 = std.time.milliTimestamp();
-
-    // Move TIFF image into standard buffer
-    const grey = try Img3D(f32).init(img.nx, img.ny, img.nz);
-    for (grey.img) |*v, i| {
-        v.* = @intToFloat(f32, img.img[i][0]) / 255;
-    }
-    const t5 = std.time.milliTimestamp();
-
-    var view_angle: f32 = 0;
-
-    // Run max projection kernel
-    var img_cl = try img2CLImg(grey, dcqp);
-    var nx: u32 = grey.nx * 1;
-    var ny: u32 = grey.ny * 1;
-    var d_output = try temp.alloc(f32, nx * ny);
-    var d_alpha_output = try temp.alloc(f32, nx * ny);
-    var d_depth_output = try temp.alloc(f32, nx * ny);
-    var args = .{
-        img_cl,
-        d_output,
-        d_alpha_output,
-        d_depth_output,
-        nx,
-        ny,
-        view_angle,
-    };
-    const argtype = "xrrrxxx";
-
-    var kernel = try Kernel(argtype.len).init(
-        dcqp,
-        "max_project_float",
-        args,
-        argtype,
-    );
-
-    try kernel.executeKernel(
-        dcqp,
-        args,
-        argtype,
-        &.{ nx, ny },
-    );
-
-    // try dcqp.callKernel(
-    //     "max_project_float",
-    //     args,
-    //     argtype,
-    //     &.{ nx, ny },
-    // );
-    const t6 = std.time.milliTimestamp();
-
-    // Save max projection result
-    // try im.saveF32AsTGAGreyNormed(d_output, @intCast(u16, ny), @intCast(u16, nx), "output/t100_rendered.tga");
-    const t7 = std.time.milliTimestamp();
-
-    print(
-        \\Timings : 
-        \\ t2-t1 = {} 
-        \\ t3-t2 = {} 
-        \\ t4-t3 = {} 
-        \\ t5-t4 = {} 
-        \\ t6-t5 = {} 
-        \\ t7-t6 = {} 
-        \\
-    , .{
-        t2 - t1,
-        t3 - t2,
-        t4 - t3,
-        t5 - t4,
-        t6 - t5,
-        t7 - t6,
-    });
-
-    // Setup SDL stuff
-    if (cc.SDL_Init(cc.SDL_INIT_VIDEO) != 0) {
-        cc.SDL_Log("Unable to initialize SDL: %s", cc.SDL_GetError());
-        return error.SDLInitializationFailed;
-    }
-    defer cc.SDL_Quit();
-    // Make window and surface
-    const window_width: c_int = @intCast(c_int, nx);
-    const window_height: c_int = @intCast(c_int, ny);
-    print("nx:{} , ny:{}\n", .{ nx, ny });
-    const window = cc.SDL_CreateWindow("weekend raytracer", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, window_width + 10, window_height + 10, cc.SDL_WINDOW_OPENGL) orelse {
-        cc.SDL_Log("Unable to create window: %s", cc.SDL_GetError());
-        return error.SDLInitializationFailed;
-    };
-    const surface = SDL_GetWindowSurface(window) orelse {
-        cc.SDL_Log("Unable to get window surface: %s", cc.SDL_GetError());
-        return error.SDLInitializationFailed;
-    };
-
-    var running = true;
-    while (running) {
-
-        // setup arena
-        // var arena2 = std.heap.ArenaAllocator.init(gpa.allocator());
-        // defer arena2.deinit();
-        // const al = arena2.allocator();
-
-        // perform the render
-        args = .{
-            img_cl,
-            d_output,
-            d_alpha_output,
-            d_depth_output,
-            nx,
-            ny,
-            view_angle,
-        };
-        try kernel.executeKernel(
-            dcqp,
-            args,
-            argtype,
-            &.{ nx, ny },
-        );
-
-        // Update window
-        _ = cc.SDL_LockSurface(surface);
-        for (d_output) |v, i| setPixel(
-            surface,
-            @intCast(c_int, i % nx),
-            @intCast(c_int, i / nx),
-            @floatToInt(u32, v * 255),
-        );
-        cc.SDL_UnlockSurface(surface);
-        if (cc.SDL_UpdateWindowSurface(window) != 0) {
-            cc.SDL_Log("Error updating window surface: %s", cc.SDL_GetError());
-            return error.SDLUpdateWindowFailed;
-        }
-
-        // Event Handling
-        var event: cc.SDL_Event = undefined;
-        while (cc.SDL_PollEvent(&event) != 0) {
-            switch (event.@"type") {
-                cc.SDL_QUIT => {
-                    running = false;
-                },
-                cc.SDL_KEYDOWN => {
-                    if (event.key.keysym.sym == cc.SDLK_q) {
-                        running = false;
-                    }
-                    if (event.key.keysym.sym == cc.SDLK_RIGHT) {
-                        view_angle += 0.1;
-                        print("view_angle {}\n", .{view_angle});
-                    }
-                    if (event.key.keysym.sym == cc.SDLK_LEFT) {
-                        view_angle -= 0.1;
-                        print("view_angle {}\n", .{view_angle});
-                    }
-                },
-                else => {},
-            }
-        }
-
-        cc.SDL_Delay(16);
-    }
-
-    return 0;
-}
 
 /// tested on ISBI CTC images
 pub fn readTIFF3D(al: std.mem.Allocator, name: []const u8) !Img3D([4]u8) {
@@ -924,3 +664,193 @@ pub fn readTIFF3D(al: std.mem.Allocator, name: []const u8) !Img3D([4]u8) {
     };
     return pic;
 }
+
+
+///
+///  MAIN() program. Load and Render TIFF with OpenCL and SDL.
+///
+
+
+pub fn main() !u8 {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    // temporary stack allocator
+    // var page = std.heap.page_allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa.allocator());
+    defer arena.deinit();
+    const temp = arena.allocator();
+
+    const testtifname = "/Users/broaddus/Desktop/mpi-remote/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01/t100.tif";
+
+    // var alo = std.testing.allocator;
+    const t1 = std.time.milliTimestamp();
+
+    // define allocator and .CL files
+    const files = &[_][]const u8{
+        "volumecaster2.cl",
+    };
+    const t2 = std.time.milliTimestamp();
+
+    // setup OpenCL Contex Queue
+    var dcqp = try DevCtxQueProg.init(temp, files);
+    defer dcqp.deinit();
+
+    const t3 = std.time.milliTimestamp();
+
+    // Load TIFF image
+    // const testtifname = "/Users/broaddus/Desktop/mpi-remote/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01/t100.tif";
+    const img = try readTIFF3D(temp, testtifname);
+    const t4 = std.time.milliTimestamp();
+
+    // Move TIFF image into standard buffer
+    const grey = try Img3D(f32).init(img.nx, img.ny, img.nz);
+    for (grey.img) |*v, i| {
+        v.* = @intToFloat(f32, img.img[i][0]) / 255;
+    }
+    const t5 = std.time.milliTimestamp();
+
+    // Run max projection kernel
+    var view_angle: f32 = 0;
+    var img_cl = try img2CLImg(grey, dcqp);
+    var nx: u32 = grey.nx * 1;
+    var ny: u32 = grey.ny * 1;
+    var d_output = try temp.alloc(f32, nx * ny);
+    var d_alpha_output = try temp.alloc(f32, nx * ny);
+    var d_depth_output = try temp.alloc(f32, nx * ny);
+    var args = .{
+        img_cl,
+        d_output,
+        d_alpha_output,
+        d_depth_output,
+        nx,
+        ny,
+        view_angle,
+    };
+    // const argtype = "xrrrxxx";
+
+    var kernel = try Kernel("max_project_float", "xrrrxxx").init(
+        dcqp,
+        args,
+    );
+    defer kernel.deinit();
+
+    const t6 = std.time.milliTimestamp();
+
+    // perform the render
+    try kernel.executeKernel(dcqp, args, &.{ nx, ny });
+
+    // Save max projection result
+    // try im.saveF32AsTGAGreyNormed(d_output, @intCast(u16, ny), @intCast(u16, nx), "output/t100_rendered.tga");
+    const t7 = std.time.milliTimestamp();
+
+    print(
+        \\Timings : 
+        \\ t2-t1 = {} 
+        \\ t3-t2 = {} 
+        \\ t4-t3 = {} 
+        \\ t5-t4 = {} 
+        \\ t6-t5 = {} 
+        \\ t7-t6 = {} 
+        \\
+    , .{
+        t2 - t1,
+        t3 - t2,
+        t4 - t3,
+        t5 - t4,
+        t6 - t5,
+        t7 - t6,
+    });
+
+    // Setup SDL stuff
+    if (cc.SDL_Init(cc.SDL_INIT_VIDEO) != 0) {
+        cc.SDL_Log("Unable to initialize SDL: %s", cc.SDL_GetError());
+        return error.SDLInitializationFailed;
+    }
+    defer cc.SDL_Quit();
+    // Make window and surface
+    const window_width: c_int = @intCast(c_int, nx);
+    const window_height: c_int = @intCast(c_int, ny);
+    print("nx:{} , ny:{}\n", .{ nx, ny });
+    const window = cc.SDL_CreateWindow("weekend raytracer", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, window_width + 10, window_height + 10, cc.SDL_WINDOW_OPENGL) orelse {
+        cc.SDL_Log("Unable to create window: %s", cc.SDL_GetError());
+        return error.SDLInitializationFailed;
+    };
+    const surface = SDL_GetWindowSurface(window) orelse {
+        cc.SDL_Log("Unable to get window surface: %s", cc.SDL_GetError());
+        return error.SDLInitializationFailed;
+    };
+
+    // Update window
+    _ = cc.SDL_LockSurface(surface);
+    for (d_output) |v, i| setPixel(
+        surface,
+        @intCast(c_int, i % nx),
+        @intCast(c_int, i / nx),
+        @floatToInt(u32, v * 255),
+    );
+    cc.SDL_UnlockSurface(surface);
+    if (cc.SDL_UpdateWindowSurface(window) != 0) {
+        cc.SDL_Log("Error updating window surface: %s", cc.SDL_GetError());
+        return error.SDLUpdateWindowFailed;
+    }
+
+    var update = false;
+    var running = true;
+    while (running) {
+
+        // setup arena
+        // var arena2 = std.heap.ArenaAllocator.init(gpa.allocator());
+        // defer arena2.deinit();
+        // const al = arena2.allocator();
+
+        // Event Handling
+        var event: cc.SDL_Event = undefined;
+        while (cc.SDL_PollEvent(&event) != 0) {
+            update = false;
+
+            switch (event.@"type") {
+                cc.SDL_QUIT => {
+                    running = false;
+                },
+                cc.SDL_KEYDOWN => {
+                    if (event.key.keysym.sym == cc.SDLK_q) {
+                        running = false;
+                    }
+                    if (event.key.keysym.sym == cc.SDLK_RIGHT) {
+                        view_angle += 0.1;
+                        update = true;
+                        print("view_angle {}\n", .{view_angle});
+                    }
+                    if (event.key.keysym.sym == cc.SDLK_LEFT) {
+                        view_angle -= 0.1;
+                        update = true;
+                        print("view_angle {}\n", .{view_angle});
+                    }
+                },
+                else => {},
+            }
+
+            if (update == false) continue;
+
+            // perform the render and update the window
+            args = .{ img_cl, d_output, d_alpha_output, d_depth_output, nx, ny, view_angle };
+            try kernel.executeKernel(dcqp, args, &.{ nx, ny });
+            _ = cc.SDL_LockSurface(surface);
+            for (d_output) |v, i| setPixel(
+                surface,
+                @intCast(c_int, i % nx),
+                @intCast(c_int, i / nx),
+                @floatToInt(u32, v * 255),
+            );
+            cc.SDL_UnlockSurface(surface);
+            if (cc.SDL_UpdateWindowSurface(window) != 0) {
+                cc.SDL_Log("Error updating window surface: %s", cc.SDL_GetError());
+                return error.SDLUpdateWindowFailed;
+            }
+        }
+
+        cc.SDL_Delay(16);
+    }
+
+    return 0;
+}
+
