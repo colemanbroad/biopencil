@@ -18,6 +18,7 @@ test {
 
 pub fn Img2D(comptime T: type) type {
     return struct {
+        const pixtype = T;
         const This = @This();
 
         img: []T,
@@ -53,6 +54,7 @@ test "test imageBase. new img2d" {
 
 pub fn Img3D(comptime T: type) type {
     return struct {
+        const pixtype = T;
         const This = @This();
         img: []T,
         nz: u32,
@@ -101,6 +103,48 @@ pub fn minmax(
 }
 
 // const DivByZeroNormalizationError = error {}
+
+pub fn isin(x: anytype, container: anytype) bool {
+    inline for (container) |c| {
+        if (x == c) return true;
+    }
+    return false;
+}
+
+var shared_global:u8 = 0;
+
+test "test isin" {
+    shared_global += 1;
+    print("test isin shared_global = {}\n",.{shared_global});
+    try expect(isin(3, .{ 1, 2, 3, 4, 5 }));
+    try expect(isin('a', .{ 1, 'a', 3, 4, 5 }));
+    try expect(!isin(3.9, .{ 1, 2, 3, 4, 5.0 }));
+    try expect(2==3); //catch return error.ArithmeticError;
+    // expect(3==3) catch print("\nexpect(3==3)\n",.{});
+    // expect(4==3) catch print("\nexpect(4==3)\n",.{});
+}
+
+pub fn norm01(comptime T:type, img: []T) void {
+    // const T = @TypeOf(img).pixtype;
+    comptime assert(isin(T, .{ f16, f32, f64, i8, u8, i16, u16, i32, u32, i64, u64 }));
+    // var min:T = 0;
+    // var max:T = 0;
+    const mima = minmax(T, img);
+    for (img) |*v| v.* = (v.* - mima[0]) / (mima[1] - mima[0]);
+}
+
+const eql = std.mem.eql;
+
+test "test norm()" {
+    shared_global += 1;
+    print("test norm() shared_global = {}\n",.{shared_global});
+
+    try expect(3==4);
+    var pic = try Img2D(f32).init(100, 101);
+    for (pic.img) |*v, i| v.* = @intToFloat(f32, i % 255);
+    norm01(f32,pic.img);
+    try expect(eql(f32, &minmax(f32, pic.img), &.{ 0.0, 1.0 }));
+}
 
 /// Checks for mx > mn
 pub fn normAffine(data: []f32, mn: f32, mx: f32) !void {
