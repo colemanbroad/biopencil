@@ -18,6 +18,25 @@ IT WORKS    IT WORKS    IT WORKS    IT WORKS    IT WORKS    IT WORKS    IT WORKS
 fast and efficient volume renderning with rotation and color, takes a TIFF path as cmd line arg.
 
 
+# Wed Oct  5 15:16:13 2022
+
+Parameterize view state by 3x3 rotation matrix and update it with arrow keys.
+This is more powerful representation than the previous `view_angles:[2]f32` model
+which required a view_angles →  rotation matrix transformation (`rotmatFromAngles()`), but we could update view_angles by 
+simply adding a scalar value. 
+
+- [x] use `setPixels()` for faster surface blitting.
+- #todo how to draw only on sub rectangle?
+- 
+
+
+
+
+# Questions
+
+- when to use `@as` vs `@intCast`.
+
+
 # Todo
 
 ## more interactive
@@ -30,4 +49,4 @@ fast and efficient volume renderning with rotation and color, takes a TIFF path 
         ideally the internal interface allows us to expose arbitrary (nested) structs and update them interactively via user.
 - [ ] 
 
-colors: smoother color pallete...
+- [ ] colors: smoother color pallete...

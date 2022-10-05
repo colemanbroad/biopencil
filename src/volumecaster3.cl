@@ -121,9 +121,8 @@ __kernel void max_project_float(
                   read_only global uchar4 *colormap,
                   uint Nx, 
                   uint Ny,
-                  float2 view_angle,
                   float2 global_minmax,
-                  read_only global float * _invM
+                  read_only global float * view_matrix
                   )
 {
 
@@ -162,7 +161,7 @@ __kernel void max_project_float(
   //     M[3][3] = 0; 
   // } 
   
-  view_angle /= 2;
+  // view_angle /= 2;
   
   // NORMALIZED COORDS IN [0,1] ! Not [-1,1] !
   // const sampler_t volumeSampler = CLK_NORMALIZED_COORDS_TRUE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_NEAREST;
@@ -185,8 +184,11 @@ __kernel void max_project_float(
   //  but then we must transform back to screen 
 
   // Model View Matrix
-  float invM[16];
-  for (int i=0; i<16; i++){invM[i] = _invM[i];}
+  float invM[16] = {0};
+  uchar idxmap[9] = {0,1,2,4,5,6,8,9,10}; // map from 3x3 array to 4x4 array
+  for (int i=0; i<9; i++){
+    invM[idxmap[i]] = view_matrix[i];
+  }
   
   // pixel x,y coordinates in normalized world coords [-1,1]
   float u = ((float) x / (float) (Nx-1))*2.0f-1.0f;

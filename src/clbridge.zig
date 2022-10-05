@@ -603,12 +603,22 @@ const SDL_WINDOWPOS_UNDEFINED = @bitCast(c_int, cc.SDL_WINDOWPOS_UNDEFINED_MASK)
 // surface pointer returned is optional!
 extern fn SDL_GetWindowSurface(window: *cc.SDL_Window) ?*cc.SDL_Surface;
 
+/// deprecated
 fn setPixel(surf: *cc.SDL_Surface, x: c_int, y: c_int, pixel: [4]u8) void {
     const target_pixel = @ptrToInt(surf.pixels) +
         @intCast(usize, y) * @intCast(usize, surf.pitch) +
         @intCast(usize, x) * 4;
     // @breakpoint();
     @intToPtr(*u32, target_pixel).* = @bitCast(u32, pixel);
+}
+
+fn setPixels(surf: *cc.SDL_Surface , buffer: [][4]u8) void {
+    _ = cc.SDL_LockSurface(surf);
+    var pix = @ptrCast([*c][4]u8 , surf.pixels.?);
+    for (buffer) |v, i| {
+        pix[i] = v;
+    }
+    cc.SDL_UnlockSurface(surf);
 }
 
 ///
@@ -718,9 +728,10 @@ pub fn main() !u8 {
     const t5 = std.time.milliTimestamp();
 
     // Run max projection kernel
-    var view_angle: [2]f32 = .{ 0, 0 };
-    var invM: [16]f32 = undefined;
-    rotmatFromAngles(&invM, view_angle);
+    // var view_angle: [2]f32 = .{ 0, 0 };
+    var view_matrix: [9]f32 = .{1,0,0, 0,1,0, 0,0,1};
+    // var invM: [16]f32 = undefined;
+    // rotmatFromAngles(&invM, view_angle);
 
     var img_cl = try img2CLImg(grey, dcqp);
     var nx: u32 = @floatToInt(u32, @intToFloat(f32, grey.nx) * 1.5);
@@ -743,12 +754,12 @@ pub fn main() !u8 {
         colormap,
         nx,
         ny,
-        view_angle,
+        // view_angle,
         mima,
-        &invM,
+        &view_matrix,
     };
 
-    var kernel = try Kernel("max_project_float", "xrwxxxxw").init(dcqp, args);
+    var kernel = try Kernel("max_project_float", "xrwxxxw").init(dcqp, args);
     defer kernel.deinit();
 
     const t6 = std.time.milliTimestamp();
@@ -787,8 +798,8 @@ pub fn main() !u8 {
         "weekend raytracer",
         SDL_WINDOWPOS_UNDEFINED,
         SDL_WINDOWPOS_UNDEFINED,
-        @intCast(c_int, nx) + 10,
-        @intCast(c_int, ny) + 10,
+        @intCast(c_int, nx),
+        @intCast(c_int, ny),
         cc.SDL_WINDOW_OPENGL,
     ) orelse {
         cc.SDL_Log("Unable to create window: %s", cc.SDL_GetError());
@@ -799,20 +810,11 @@ pub fn main() !u8 {
         cc.SDL_Log("Unable to get window surface: %s", cc.SDL_GetError());
         return error.SDLInitializationFailed;
     };
-
-    // var pixel_buffer = try im.Img2D([4]u8).init(nx, ny);
-    // defer pixel_buffer.deinit();
-    // surface.pixels = pixel_buffer.img.ptr;
+    // @compileLog("Type of surface is ", @TypeOf(surface));
 
     // Update window
-    _ = cc.SDL_LockSurface(surface);
-    for (d_output) |v, i| setPixel(
-        surface,
-        @intCast(c_int, i % nx),
-        @intCast(c_int, i / nx),
-        v,
-    );
-    cc.SDL_UnlockSurface(surface);
+    setPixels(surface,d_output);
+
     if (cc.SDL_UpdateWindowSurface(window) != 0) {
         cc.SDL_Log("Error updating window surface: %s", cc.SDL_GetError());
         return error.SDLUpdateWindowFailed;
@@ -820,18 +822,12 @@ pub fn main() !u8 {
 
     var update = false;
     var running = true;
-    var update_count: u16 = 0;
+    var update_count: u64 = 0;
 
     // var boxpts:[8]Vec2 = undefined;
-
     // var imgnamebuffer:[100]u8 = undefined;
 
     while (running) {
-
-        // setup arena
-        // var arena2 = std.heap.ArenaAllocator.init(gpa.allocator());
-        // defer arena2.deinit();
-        // const al = arena2.allocator();
 
         // Event Handling
         var event: cc.SDL_Event = undefined;
@@ -845,66 +841,85 @@ pub fn main() !u8 {
                         running = false;
                     }
                     if (event.key.keysym.sym == cc.SDLK_RIGHT) {
-                        view_angle[0] += 0.1;
+                        view_matrix = matMulNNRowFirst(3,f32,view_matrix,delta.right);
                         update = true;
-                        // print("view_angle {}\n", .{view_angle});
                     }
                     if (event.key.keysym.sym == cc.SDLK_LEFT) {
-                        view_angle[0] -= 0.1;
+                        view_matrix = matMulNNRowFirst(3,f32,view_matrix,delta.left);
                         update = true;
                         // print("view_angle {}\n", .{view_angle});
                     }
                     if (event.key.keysym.sym == cc.SDLK_UP) {
-                        view_angle[1] += 0.1;
+                        view_matrix = matMulNNRowFirst(3,f32,view_matrix,delta.up);
                         update = true;
                         // print("view_angle {}\n", .{view_angle});
                     }
                     if (event.key.keysym.sym == cc.SDLK_DOWN) {
-                        view_angle[1] -= 0.1;
+                        view_matrix = matMulNNRowFirst(3,f32,view_matrix,delta.down);
                         update = true;
                         // print("view_angle {}\n", .{view_angle});
                     }
                 },
                 else => {},
             }
-
-            if (update == false) continue;
-            update_count += 1;
-
-            rotmatFromAngles(&invM, view_angle);
-            // perform the render and update the window
-            args = .{ img_cl, d_output, colormap, nx, ny, view_angle, mima, &invM };
-            try kernel.executeKernel(dcqp, args, &.{ nx, ny });
-            // _ = cl.clFinish(dcqp.command_queue);
-
-            // paintScreen(d_output,d_alpha_output,d_depth_output)
-            _ = cc.SDL_LockSurface(surface);
-            for (d_output) |v, i| setPixel(
-                surface,
-                @intCast(c_int, i % nx),
-                @intCast(c_int, i / nx),
-                v,
-            );
-            cc.SDL_UnlockSurface(surface);
-
-            if (cc.SDL_UpdateWindowSurface(window) != 0) {
-                cc.SDL_Log("Error updating window surface: %s", cc.SDL_GetError());
-                return error.SDLUpdateWindowFailed;
-            }
-
-            update = false;
-
-            // Save max projection result
-            // const filename = try std.fmt.bufPrint(&imgnamebuffer, "output/t100_rendered_{d:0>3}.tga", .{update_count});
-            // try im.saveF32AsTGAGreyNormed(d_output, @intCast(u16, ny), @intCast(u16, nx), filename);
-
         }
 
-        cc.SDL_Delay(16);
+        if (update == false) {
+            cc.SDL_Delay(16);
+            continue;
+        }
+
+        update_count += 1;
+
+        // perform the render and update the window
+        args = .{ img_cl, d_output, colormap, nx, ny, mima, &view_matrix };
+        try kernel.executeKernel(dcqp, args, &.{ nx, ny });
+        // _ = cl.clFinish(dcqp.command_queue);
+
+        setPixels(surface,d_output);
+
+        if (cc.SDL_UpdateWindowSurface(window) != 0) {
+            cc.SDL_Log("Error updating window surface: %s", cc.SDL_GetError());
+            return error.SDLUpdateWindowFailed;
+        }
+
+        update = false;
+
+        // Save max projection result
+        // const filename = try std.fmt.bufPrint(&imgnamebuffer, "output/t100_rendered_{d:0>3}.tga", .{update_count});
+        // try im.saveF32AsTGAGreyNormed(d_output, @intCast(u16, ny), @intCast(u16, nx), filename);
     }
 
     return 0;
 }
+
+
+const delta = struct {
+    const c = @cos(2*std.math.pi / 32.0);
+    const s = @sin(2*std.math.pi / 32.0);
+
+    // rotate z to right, x into screen.
+    pub const right:[9]f32 = .{
+        c,0,s,
+        0,1,0,
+        -s,0,c,
+    };
+    pub const left:[9]f32 = .{
+        c,0,-s,
+        0,1,0,
+        s,0,c,
+    };
+    pub const up:[9]f32 = .{
+        1,0,0,
+        0,c,-s,
+        0,s,c,
+    };
+    pub const down:[9]f32 = .{
+        1,0,0,
+        0,c,s,
+        0,-s,c,
+    };
+};
 
 fn rotmatFromAngles(invM: *[16]f32, view_angle: [2]f32) void {
     const c0 = @cos(view_angle[0]);
@@ -932,13 +947,16 @@ fn rotmatFromAngles(invM: *[16]f32, view_angle: [2]f32) void {
 
 pub fn matMulNNRowFirst(comptime n: u8, comptime T: type, left: [n * n]T, right: [n * n]T) [n * n]T {
     var result: [n * n]T = .{0} ** (n * n);
-    inline for (result) |*c, k| {
-        comptime var i = (k / n) * n;
-        comptime var j = k % n;
-        comptime var m = 0;
-        inline while (m < n) : (m += 1) {
-            c.* += left[i + m] * right[j + m * n];
-            // @compileLog(i+m, j+m*n);
+    assert(n<128);
+    comptime {
+        for (result) |*c, k| {
+            var i = (k / n) * n;
+            var j = k % n;
+            var m = 0;
+            while (m < n) : (m += 1) {
+                c.* += left[i + m] * right[j + m * n];
+                // @compileLog(i+m, j+m*n);
+            }
         }
     }
     return result;
@@ -954,8 +972,8 @@ test "test matMulRowFirst" {
         const c = [9]f32{ 0.48633017, 0.51415297, 0.6913064, 0.71073529, 0.69215076, 0.9237199, 0.33364612, 0.27141822, 0.84628778 };
         const d = matMulNNRowFirst(3, f32, a, b);
         const V = @Vector(9, f32);
-        const delta = @reduce(.Add, @as(V, c) - @as(V, d));
-        try expect(delta < 1e-5);
+        const delt = @reduce(.Add, @as(V, c) - @as(V, d));
+        try expect(delt < 1e-5);
     }
 
     {
