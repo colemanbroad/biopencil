@@ -6,18 +6,15 @@
   http://developer.download.nvidia.com/compute/cuda/4_2/rel/sdk/website/OpenCL/html/samples.html
   mweigert@mpi-cbg.de
 
-  Update - Wed Oct  6 2021 - coleman.broaddus@gmail.com
-  Adapted for Zig + OpenCL.
+  Adapted for Zig + OpenCL starting Wed Oct  6 2021 [coleman.broaddus@gmail.com]
   
- */
+  
+*/
 
+int intersectBox(float4 r_o, float4 r_d, float4 boxmin, float4 boxmax, float *tnear, float *tfar) {
 
-// #define LOOPUNROLL 16
-
-int intersectBox(float4 r_o, float4 r_d, float4 boxmin, float4 boxmax, float *tnear, float *tfar)
-{
     // compute intersection of ray with all six bbox planes
-    float4 invR = (float4)(1.0f,1.0f,1.0f,1.0f) / r_d;
+    float4 invR = (float4){1.0f,1.0f,1.0f,1.0f} / r_d;
     float4 tbot = invR * (boxmin - r_o);
     float4 ttop = invR * (boxmax - r_o);
 
@@ -37,90 +34,42 @@ int intersectBox(float4 r_o, float4 r_d, float4 boxmin, float4 boxmax, float *tn
 
 
 #define MPI_2 6.2831853071795f
+#define RadPerDegree 0.017453292519943295; // PI/180;
 
 
 // returns random value between [0,1]
-inline float random2(uint x, uint y)
-{   
+inline float random2(uint x, uint y) {
     uint a = 4421 +(1+x)*(1+y) +x +y;
-
-    for(int i=0; i < 10; i++)
-    {
+    for(int i=0; i < 10; i++) {
         a = (1664525 * a + 1013904223) % 79197919;
     }
-
     float rnd = (a*1.0f)/(79197919);
-
     return rnd;
-
 }
 
-inline float rand_int2(uint x, uint y, int start, int end)
-{
+inline float rand_int2(uint x, uint y, int start, int end) {
     uint a = 4421 +(1+x)*(1+y) +x +y;
-
-    for(int i=0; i < 10; i++)
-    {
+    for(int i=0; i < 10; i++){
         a = (1664525 * a + 1013904223) % 79197919;
     }
-
     float rnd = (a*1.0f)/(79197919);
-
     return (int)(start+rnd*(end-start));
-
 }
+
 
 
 
 // assumes row-first matrix layout
 float4 mult(float M[16], float4 v){
   float4 res;
-  res.x = dot(v, (float4)(M[0],M[1],M[2],M[3]));
-  res.y = dot(v, (float4)(M[4],M[5],M[6],M[7]));
-  res.z = dot(v, (float4)(M[8],M[9],M[10],M[11]));
-  res.w = dot(v, (float4)(M[12],M[13],M[14],M[15]));
+  res.x = dot(v, (float4){M[0],M[1],M[2],M[3]} );
+  res.y = dot(v, (float4){M[4],M[5],M[6],M[7]} );
+  res.z = dot(v, (float4){M[8],M[9],M[10],M[11]} );
+  res.w = dot(v, (float4){M[12],M[13],M[14],M[15]} );
   return res;
 }
 
-
 #define read_image(volume , sampler , pos , isShortType) (isShortType?1.f*read_imageui(volume, sampler, pos).x:read_imagef(volume, sampler, pos).x)
-
-
-// #define whynot if ((x==150 || x==200|| x==250) && (y==150 || y==200 || y==250))
-
-// the basic max_project ray casting
-
-// #define M_PI
-
-
-
- // Examples:
- // (fovy=45, aspect=1., z1=0.1, z2=10)
- // (60,1.,1,10)
-
-// like gluPerspective(fovy, aspect, zNear, zFar)
-//        fovy in degrees
-// void mat4_perspective(float fovy, float aspect, float z1, float z2, float view_angle, float * mat) {
-//     float f = 1.0 / tan(fovy/180.0 * M_PI/2.0);
-// 
-//     // float _mat[16] = {1.*f/aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, -1.*(z2+z1)/(z2-z1), -2.0*z1*z2/(z2-z1), 0, 0, -1, 0};
-// 
-//     // float _mat[16] = {1.*f/aspect, 0, 0, 0, 
-//     //                   0, f, 0, 0, 
-//     //                   0, 0, -1.*(z2+z1)/(z2-z1), -2.0*z1*z2/(z2-z1), 
-//     //                   0, 0, -1, 0};
-// 
-//     // 
-//     float _mat[16] = {1.*f/aspect, 0,                   0,  0, 
-//                       0,           f,                   0,  0, 
-//                       0,           0, -1.*(z2+z1)/(z2-z1), -1, 
-//                       0,           0, -2.0*z1*z2/(z2-z1) ,  0};
-//     
-// 
-//     for (int i=0;i<16;i++) mat[i] = _mat[i]; 
-// }
-
-
 
 
 // Tell me the value of the pixel at a certain location.
@@ -165,17 +114,16 @@ __kernel void enumerateBuffer(
   d_output[x + 10*y] = (float) (x*y);
 }
 
-#define RadPerDegree 0.017453292519943295; // PI/180;
-
 // Nx,Ny = width & height of output (also compute grid?)
 __kernel void max_project_float(
-                  __read_only image3d_t volume,
-                  __global float *d_output, // probably Nx x Ny "__global" mem so must be buffers
-                  __global float *d_alpha_output, // same       "__global" mem so must be buffers
-                  __global float *d_depth_output, // same       "__global" mem so must be buffers
+                  read_only image3d_t volume,
+                  global uchar4 *d_output,
+                  read_only global uchar4 *colormap,
                   uint Nx, 
                   uint Ny,
-                  float view_angle
+                  float2 view_angle,
+                  float2 global_minmax,
+                  read_only global float * _invM
                   )
 {
 
@@ -191,7 +139,7 @@ __kernel void max_project_float(
   float clipLow    = 0.0;
   float clipHigh    = 1.0;
   float gamma     = 1.0;
-  float alpha_pow = 0.3;
+  float alpha_pow = 0.0;
 
   // int zdepth = get_image_depth(volume);
 
@@ -227,8 +175,8 @@ __kernel void max_project_float(
 
 
   // Clipping Boxes with domain [-1..1]
-  float4 boxMin = (float4)(boxMin_x,boxMin_y,boxMin_z,1.f);
-  float4 boxMax = (float4)(boxMax_x,boxMax_y,boxMax_z,1.f);
+  float4 boxMin = (float4){boxMin_x,boxMin_y,boxMin_z,1.f};
+  float4 boxMax = (float4){boxMax_x,boxMax_y,boxMax_z,1.f};
 
   // place origin [view always pointing to image center 0,0,0]
   // find normalized ray direction = [u,v,1] rotated s.t. [0,0,1] points from cam to volume origin
@@ -238,35 +186,25 @@ __kernel void max_project_float(
 
   // Model View Matrix
   float invM[16];
-  {
-    float c = cospi(view_angle);
-    float s = sinpi(view_angle);
-    float _invM[] = 
-      {c  , 0 , -s , 0 ,
-       0  , 1 , 0  , 0 ,
-       s  , 0 , c  , 0 ,
-       0  , 0 , 0  , 1 }; // ??
-
-    for (int i=0; i<16; i++){invM[i] = _invM[i];}
-  }
+  for (int i=0; i<16; i++){invM[i] = _invM[i];}
   
   // pixel x,y coordinates in normalized world coords [-1,1]
   float u = ((float) x / (float) (Nx-1))*2.0f-1.0f;
   float v = ((float) y / (float) (Ny-1))*2.0f-1.0f;
 
   // front and back planes. ray is cast from front → back
-  float4 front = (float4)(u,v,-1,1); // start at z coordinate -1
-  float4 back  = (float4)(u,v, 1,1); // end at z coordinate 1. (remember, the volume coords are normalized).  
+  float4 front = (float4){u,v,-1,1}; // start at z coordinate -1
+  float4 back  = (float4){u,v, 1,1}; // end at z coordinate 1. (remember, the volume coords are normalized).  
 
   // Perspective - control size of front and back planes. determine scale of volume and orthographic vs perspective.
-  front *= (float4)(1.2,1.2,1,1);
-  back  *= (float4)(1.8,1.8,1,1);
+  front *= (float4){1.2,1.2,1,1};
+  back  *= (float4){1.8,1.8,1,1};
   // View Angle
   front = mult(invM,front);
   back  = mult(invM,back);
   // Anisotropy - voxel size
-  front *= (float4)(1,1,4,1);
-  back  *= (float4)(1,1,4,1);
+  front *= (float4){1,1,4,1};
+  back  *= (float4){1,1,4,1};
 
   float4 direc = normalize(back - front);
   direc.w = 0.0f;
@@ -284,112 +222,86 @@ __kernel void max_project_float(
   // }
 
   if (!hit) {
-    d_output[idx] = 0.0f;
-    d_alpha_output[idx] = -1.f;
-    d_depth_output[idx] = -1.f;
+    d_output[idx] = (uchar4){0,0,0,255};
     return;
   }
 
-  // Setup Ray stepping geometry
-  // if (tnear < 0.0f) tnear = 0.0f;
-  // const int reducedSteps = maxSteps; // /numParts
-  const int maxSteps = 15;
-  const float dt = fabs(tfar-tnear)/maxSteps; //((reducedSteps/LOOPUNROLL)*LOOPUNROLL);
-  // const int maxSteps = int(fabs(tfar-tnear)/dt); // assume dt = 1;
-  const float4 delta_pos = dt*direc;
-  // const float4 delta_pos = direc;
-  // float4 pos = 0.5f * (1.f + front + tnear*direc);
-  float4 pos = front + tnear*direc;
-
-
-  // apply the shift if mulitpass
-
-  // front += currentPart*dt*direc;
-
-  // if ((x==150 || x==200|| x==250) && (y==150 || y==200 || y==250)) {
-  //   // printf("pos is: %0.2f %0.2f %0.2f \n", pos.x , pos.y, pos.z);
-  //   // printf("cumsum = %f \n", cumsum);
-  //   printf("front is: %0.2f %0.2f %0.2f \n", front.x , front.y, front.z);
-  //   printf("direc is: %0.2f %0.2f %0.2f \n", direc.x , direc.y, direc.z);
-  //   printf("reducedSteps = %f \n", reducedSteps);
-  //   // printf("currentPart = %f \n", currentPart);
-  //   printf("dt = %f \n", dt);
-  // }      
-
-  // dither the original
+  // // dither the original
   // uint entropy = (uint)( 6779514*length(front) + 6257327*length(direc) );
-  // printf("x,y,rand = %d %d %d \n", x, y , random(x*93939393,y*383838)%100);
+  // // printf("x,y,rand = %d %d %d \n", x, y , random(x*93939393,y*383838)%100);
   // front += dt*random(entropy+x,entropy+y)*direc;
-  // TODO: how to properly implement dither? Is dither just to prevent aliasing?
+  // // TODO: how to properly implement dither? Is dither just to prevent aliasing?
   // float jitterx = (random(x*93939393,y*383837)%100) / 100.0 / Nx * 3.0;
   // float jittery = (random(x*23942347,y*294833)%100) / 100.0 / Ny * 3.0;
   // front += (float4) {jitterx,jittery,0,0};
 
+
+
+  // Setup Ray stepping geometry
+  // if (tnear < 0.0f) tnear = 0.0f;
+  // const int reducedSteps = maxSteps; // /numParts
+  // const int maxSteps = int(fabs(tfar-tnear)/dt); // assume dt = 1;
+  // const float4 delta_pos = direc;
+  // float4 pos = 0.5f * (1.f + front + tnear*direc);
+  const int maxSteps = 15;
+  const float dt = fabs(tfar-tnear)/maxSteps; //((reducedSteps/LOOPUNROLL)*LOOPUNROLL);
+  const float4 delta_pos = dt*direc;
+  float4 pos = front + tnear*direc;
+  float4 maxValPosition = pos;
+
   // initial values for output
-  float currentVal = 0.f;
-  float alphaVal = 0;
   float maxVal = 0;
   int maxValDepth = 0;
-  // int curInd = 0;
-  uint testidx;
 
   if (alpha_pow==0) {
-    for(int i=0; i <= maxSteps; ++i){
-      //for (int j = 0; j < LOOPUNROLL; ++j){
-        currentVal = read_imagef(volume, volumeSampler, pos/2 + float4(0.5)).x;
-        // maxValDepth = currentVal>maxVal?i*LOOPUNROLL+j:maxValDepth;
-        maxValDepth = (currentVal > maxVal) ? i : maxValDepth;
-        maxVal = fmax(maxVal,currentVal);
 
-        // maxVal = fmax(maxVal,read_imagef(volume, volumeSampler, pos).x);
-        pos += delta_pos;
-      //}
-      testidx = uint((Nx*Ny)/2);
-      if (idx==testidx) printf("currentVal %f \n",currentVal);
+    float currentVal = 0.f;
+
+    for(int i=0; i <= maxSteps; ++i){
+
+      currentVal = read_imagef(volume, volumeSampler, pos/2 + float4(0.5)).x;
+      maxValDepth = (currentVal > maxVal) ? i : maxValDepth;
+      maxValPosition = (currentVal > maxVal) ? pos : maxValPosition;
+      maxVal = fmax(maxVal,currentVal);
+
+      // 
+      pos += delta_pos;
+
     }
 
-    // maxVal = (maxVal == 0)?maxVal:(maxVal-clipLow)/(clipHigh-clipLow);
-    alphaVal = maxVal;
   } else {
     
+    float currentVal = 0.f;
     float cumsum = 1.f; // keep track of multiplicative absorption
 
     for(int i=0; i <= maxSteps; ++i){
+
         currentVal = read_imagef(volume, volumeSampler, pos/2 + float4(0.5)).x;
         // currentVal = (maxVal == 0)?currentVal:(currentVal-clipLow)/(clipHigh-clipLow);
         maxValDepth = (cumsum * currentVal > maxVal) ? i : maxValDepth;
+        maxValPosition = (currentVal > maxVal) ? pos : maxValPosition;
         maxVal = fmax(maxVal,cumsum*currentVal);
+
         cumsum  *= (1.f-.1f*alpha_pow*clamp(currentVal,0.f,1.f));
         pos += delta_pos;
         if (cumsum<=0.02f) break;
+    
     }
+
   }
 
+  // float4 maxValPosition = front + direc*maxValDepth;
+  float zDepth = maxValPosition.z / 2 + float(0.5);
+  maxVal = (maxVal - global_minmax[0])/(global_minmax[1] - global_minmax[0]);
   maxVal = clamp(pow(maxVal,gamma),0.f,1.f);
-  alphaVal = clamp(maxVal,0.f,1.f);
+  float alphaVal = clamp(maxVal,0.f,1.f);
+  
+  // d_output[idx] = convert_uchar4(temp);
+  uchar4 color = colormap[uchar(255*zDepth)];
+  d_output[idx] = convert_uchar4(convert_float4(color) * float4(maxVal));
+  // float4 temp = (float4){255,255,255,255} * float4(maxVal); // * float4(zDepth);
+  // d_output[idx] = uchar4(maxVal*255);
 
-  // for depth test...
-  // alphaVal = tnear;
-  //if (maxValDepth>-1)
-  //  alphaVal = maxValDepth*dt;
-  //else
-  // alphaVal = 0.f;
-
-
-  // d_output[x+Nx*y] = maxVal;
-  // d_alpha_output[x+Nx*y] = alphaVal;
-
-  // if ((x < Nx) && (y < Ny)){
-  if (currentPart==0) {
-    d_output[idx] = maxVal;
-    d_alpha_output[idx] = alphaVal;
-    d_depth_output[idx] = maxValDepth;
-  } else {
-    d_output[idx] = fmax(maxVal,d_output[idx]);
-    d_alpha_output[idx] = fmax(alphaVal,d_alpha_output[idx]);
-    d_depth_output[idx] = fmax((float) maxValDepth,d_depth_output[idx]);
-  }
-  // }
-
+  return;
 }
 

@@ -603,18 +603,12 @@ const SDL_WINDOWPOS_UNDEFINED = @bitCast(c_int, cc.SDL_WINDOWPOS_UNDEFINED_MASK)
 // surface pointer returned is optional!
 extern fn SDL_GetWindowSurface(window: *cc.SDL_Window) ?*cc.SDL_Surface;
 
-fn setPixel(surf: *cc.SDL_Surface, x: c_int, y: c_int, pixel: u32) void {
+fn setPixel(surf: *cc.SDL_Surface, x: c_int, y: c_int, pixel: [4]u8) void {
     const target_pixel = @ptrToInt(surf.pixels) +
         @intCast(usize, y) * @intCast(usize, surf.pitch) +
         @intCast(usize, x) * 4;
     // @breakpoint();
-    const val = @bitCast(u32, [4]u8{
-        @intCast(u8, pixel % 255),
-        @intCast(u8, pixel % 255),
-        @intCast(u8, pixel % 255),
-        255,
-    });
-    @intToPtr(*u32, target_pixel).* = val;
+    @intToPtr(*u32, target_pixel).* = @bitCast(u32, pixel);
 }
 
 ///
@@ -708,7 +702,12 @@ pub fn main() !u8 {
 
     // Load TIFF image
     const testtifname = "/Users/broaddus/Desktop/mpi-remote/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01/t100.tif";
-    const img = try readTIFF3D(temp, testtifname);
+    var arg_it = try std.process.argsWithAllocator(temp);
+    _ = arg_it.skip(); // skip exe name
+    const filename = arg_it.next() orelse testtifname;
+    // break :blk try std.fmt.parseUnsigned(usize, npts_str, 10);
+
+    const img = try readTIFF3D(temp, filename);
     // Move TIFF image into standard buffer
     const grey = try Img3D(f32).init(img.nx, img.ny, img.nz);
     for (grey.img) |*v, i| {
@@ -719,25 +718,37 @@ pub fn main() !u8 {
     const t5 = std.time.milliTimestamp();
 
     // Run max projection kernel
-    var view_angle: f32 = 0;
+    var view_angle: [2]f32 = .{ 0, 0 };
+    var invM: [16]f32 = undefined;
+    rotmatFromAngles(&invM, view_angle);
+
     var img_cl = try img2CLImg(grey, dcqp);
     var nx: u32 = @floatToInt(u32, @intToFloat(f32, grey.nx) * 1.5);
     var ny: u32 = @floatToInt(u32, @intToFloat(f32, grey.ny) * 1.5);
-    var d_output = try temp.alloc(f32, nx * ny);
-    var d_alpha_output = try temp.alloc(f32, nx * ny);
-    var d_depth_output = try temp.alloc(f32, nx * ny);
+    var d_output = try temp.alloc([4]u8, nx * ny);
+    var colormap = try temp.alloc([4]u8, 256);
+
+    const mima = im.minmax(f32, grey.img);
+
+    for (colormap) |*v, i| v.* = .{
+        @intCast(u8, i), // Blue
+        @intCast(u8, 255 - i), // Green
+        @intCast(u8, 255 - i), // Red
+        255,
+    };
+
     var args = .{
         img_cl,
         d_output,
-        d_alpha_output,
-        d_depth_output,
+        colormap,
         nx,
         ny,
         view_angle,
+        mima,
+        &invM,
     };
-    // const argtype = "xrrrxxx";
 
-    var kernel = try Kernel("max_project_float", "xrrrxxx").init(dcqp, args);
+    var kernel = try Kernel("max_project_float", "xrwxxxxw").init(dcqp, args);
     defer kernel.deinit();
 
     const t6 = std.time.milliTimestamp();
@@ -799,7 +810,7 @@ pub fn main() !u8 {
         surface,
         @intCast(c_int, i % nx),
         @intCast(c_int, i / nx),
-        @floatToInt(u32, v * 255),
+        v,
     );
     cc.SDL_UnlockSurface(surface);
     if (cc.SDL_UpdateWindowSurface(window) != 0) {
@@ -810,6 +821,9 @@ pub fn main() !u8 {
     var update = false;
     var running = true;
     var update_count: u16 = 0;
+
+    // var boxpts:[8]Vec2 = undefined;
+
     // var imgnamebuffer:[100]u8 = undefined;
 
     while (running) {
@@ -822,7 +836,6 @@ pub fn main() !u8 {
         // Event Handling
         var event: cc.SDL_Event = undefined;
         while (cc.SDL_PollEvent(&event) != 0) {
-
             switch (event.@"type") {
                 cc.SDL_QUIT => {
                     running = false;
@@ -832,14 +845,24 @@ pub fn main() !u8 {
                         running = false;
                     }
                     if (event.key.keysym.sym == cc.SDLK_RIGHT) {
-                        view_angle += 0.1;
+                        view_angle[0] += 0.1;
                         update = true;
-                        print("view_angle {}\n", .{view_angle});
+                        // print("view_angle {}\n", .{view_angle});
                     }
                     if (event.key.keysym.sym == cc.SDLK_LEFT) {
-                        view_angle -= 0.1;
+                        view_angle[0] -= 0.1;
                         update = true;
-                        print("view_angle {}\n", .{view_angle});
+                        // print("view_angle {}\n", .{view_angle});
+                    }
+                    if (event.key.keysym.sym == cc.SDLK_UP) {
+                        view_angle[1] += 0.1;
+                        update = true;
+                        // print("view_angle {}\n", .{view_angle});
+                    }
+                    if (event.key.keysym.sym == cc.SDLK_DOWN) {
+                        view_angle[1] -= 0.1;
+                        update = true;
+                        // print("view_angle {}\n", .{view_angle});
                     }
                 },
                 else => {},
@@ -848,26 +871,19 @@ pub fn main() !u8 {
             if (update == false) continue;
             update_count += 1;
 
+            rotmatFromAngles(&invM, view_angle);
             // perform the render and update the window
-            args = .{ img_cl, d_output, d_alpha_output, d_depth_output, nx, ny, view_angle };
+            args = .{ img_cl, d_output, colormap, nx, ny, view_angle, mima, &invM };
             try kernel.executeKernel(dcqp, args, &.{ nx, ny });
+            // _ = cl.clFinish(dcqp.command_queue);
 
+            // paintScreen(d_output,d_alpha_output,d_depth_output)
             _ = cc.SDL_LockSurface(surface);
-            // for (d_output) |v, i| {
-            //     pixel_buffer.img[i] = .{
-            //         @floatToInt(u8, 255 * v),
-            //         @floatToInt(u8, 255 * v),
-            //         @floatToInt(u8, 0),
-            //         @floatToInt(u8, 255),
-            //     };
-            // }
-
-            // im.norm01(f32,d_depth_output);
             for (d_output) |v, i| setPixel(
                 surface,
                 @intCast(c_int, i % nx),
                 @intCast(c_int, i / nx),
-                @floatToInt(u32, v * 255),
+                v,
             );
             cc.SDL_UnlockSurface(surface);
 
@@ -875,6 +891,7 @@ pub fn main() !u8 {
                 cc.SDL_Log("Error updating window surface: %s", cc.SDL_GetError());
                 return error.SDLUpdateWindowFailed;
             }
+
             update = false;
 
             // Save max projection result
@@ -887,4 +904,79 @@ pub fn main() !u8 {
     }
 
     return 0;
+}
+
+fn rotmatFromAngles(invM: *[16]f32, view_angle: [2]f32) void {
+    const c0 = @cos(view_angle[0]);
+    const s0 = @sin(view_angle[0]);
+    const r0 = [16]f32{
+        c0, 0, -s0, 0,
+        0,  1, 0,   0,
+        s0, 0, c0,  0,
+        0,  0, 0,   1,
+    };
+
+    const c1 = @cos(view_angle[1]);
+    const s1 = @sin(view_angle[1]);
+    const r1 = [16]f32{
+        1, 0,  0,   0,
+        0, c1, -s1, 0,
+        0, s1, c1,  0,
+        0, 0,  0,   1,
+    };
+
+    invM.* = matMulNNRowFirst(4, f32, r1, r0);
+
+    // for (int i=0; i<16; i++){invM[i] = _invM[i];}
+}
+
+pub fn matMulNNRowFirst(comptime n: u8, comptime T: type, left: [n * n]T, right: [n * n]T) [n * n]T {
+    var result: [n * n]T = .{0} ** (n * n);
+    inline for (result) |*c, k| {
+        comptime var i = (k / n) * n;
+        comptime var j = k % n;
+        comptime var m = 0;
+        inline while (m < n) : (m += 1) {
+            c.* += left[i + m] * right[j + m * n];
+            // @compileLog(i+m, j+m*n);
+        }
+    }
+    return result;
+}
+
+const expect = std.testing.expect;
+const eql = std.mem.eql;
+
+test "test matMulRowFirst" {
+    {
+        const a = [9]f32{ 0.58166294, 0.33293927, 0.81886478, 0.63398062, 0.85116383, 0.8195473, 0.83363027, 0.52720334, 0.17217296 };
+        const b = [9]f32{ 0.05057727, 0.00987139, 0.74565127, 0.42741473, 0.34184494, 0.37298805, 0.3842003, 0.48188364, 0.16291618 };
+        const c = [9]f32{ 0.48633017, 0.51415297, 0.6913064, 0.71073529, 0.69215076, 0.9237199, 0.33364612, 0.27141822, 0.84628778 };
+        const d = matMulNNRowFirst(3, f32, a, b);
+        const V = @Vector(9, f32);
+        const delta = @reduce(.Add, @as(V, c) - @as(V, d));
+        try expect(delta < 1e-5);
+    }
+
+    {
+        const a = [9]u32{ 1, 1, 1, 0, 0, 0, 0, 0, 0 };
+        const b = [9]u32{ 1, 1, 1, 0, 0, 0, 0, 0, 0 };
+        const c = [9]u32{ 1, 1, 1, 0, 0, 0, 0, 0, 0 };
+        const d = matMulNNRowFirst(3, u32, a, b);
+        try expect(eql(u32, &c, &d));
+    }
+
+    {
+        const a = [4]u5{ 1, 2, 3, 4 };
+        const b = [4]u5{ 1, 2, 3, 4 };
+        const c = [4]u5{ 7, 10, 15, 22 };
+        const d = matMulNNRowFirst(2, u5, a, b);
+        try expect(eql(u5, &c, &d));
+    }
+
+    // const a = [4]u32{1,1,0,0};
+    // const b = [4]u32{1,1,0,0};
+    // const c = matMulNNRowFirst(2,u32,a,b);
+
+    // print("\n\na*b {d} \n\n, c {d} \n\n", .{matMulNNRowFirst(3,u32,a,b), c});
 }
