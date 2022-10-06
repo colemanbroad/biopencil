@@ -219,7 +219,7 @@ __kernel void max_project_float(
   float clipLow   = 0.0;
   float clipHigh  = 1.0;
   float gamma     = 1.0;
-  float alpha_pow = 0.0;
+  float alpha_pow = 0.3;
 
   // int zdepth = get_image_depth(volume);
 
@@ -266,27 +266,28 @@ __kernel void max_project_float(
   // if (tnear < 0.0f) tnear = 0.0f;
   // const int reducedSteps = maxSteps; // /numParts
   // const int maxSteps = int(fabs(tfar-tnear)/dt); // assume dt = 1;
-  // const float4 delta_pos = r.direc;
-  // float4 pos = 0.5f * (1.f + r.orig + tnear*r.direc);
   const int maxSteps = 15;
   const float dt = fabs(tfar-tnear)/maxSteps; //((reducedSteps/LOOPUNROLL)*LOOPUNROLL);
-  const float3 delta_pos = dt*r.direc;
-  float3 pos = r.orig + tnear*r.direc;
-  float3 maxValPosition = pos;
+  
+  // delta_pos, pos, maxValPosition are re-normalized into [0,1] for access into read_imagef() with normalized coords
+  const float4 delta_pos = (float4){dt*r.direc/2, 0};
+  float4 pos = (float4){(r.orig+tnear*r.direc)/2 + (float3)(0.5), 0};
+  float4 maxValPosition = pos;
 
   // initial values for output
   float maxVal = 0;
   int maxValDepth = 0;
 
+
+  // Perform the max projection
   if (alpha_pow==0) {
 
     float currentVal = 0.f;
 
     for(int i=0; i <= maxSteps; ++i){
 
-      float4 npos = (float4){pos/2 + float3(0.5) , 0};
       // if (idx==181248) {printf("position = %2.2v4hlf \n", npos);}
-      currentVal = read_imagef(volume, volumeSampler, npos).x;
+      currentVal = read_imagef(volume, volumeSampler, pos).x;
       maxValDepth = (currentVal > maxVal) ? i : maxValDepth;
       maxValPosition = (currentVal > maxVal) ? pos : maxValPosition;
       maxVal = fmax(maxVal,currentVal);
@@ -303,7 +304,7 @@ __kernel void max_project_float(
 
     for(int i=0; i <= maxSteps; ++i){
 
-        currentVal = read_imagef(volume, volumeSampler, (float4){pos/2 + float3(0.5) , 0}).x;
+        currentVal = read_imagef(volume, volumeSampler, pos).x;
         // currentVal = (maxVal == 0)?currentVal:(currentVal-clipLow)/(clipHigh-clipLow);
         maxValDepth = (cumsum * currentVal > maxVal) ? i : maxValDepth;
         maxValPosition = (currentVal > maxVal) ? pos : maxValPosition;
@@ -318,7 +319,7 @@ __kernel void max_project_float(
   }
 
   // float4 maxValPosition = r.orig + r.direc*maxValDepth;
-  float zDepth = maxValPosition.z / 2 + float(0.5);
+  float zDepth = maxValPosition.z;
   maxVal = (maxVal - global_minmax[0])/(global_minmax[1] - global_minmax[0]);
   maxVal = clamp(pow(maxVal,gamma),0.f,1.f);
   float alphaVal = clamp(maxVal,0.f,1.f);
