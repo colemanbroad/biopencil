@@ -6,7 +6,7 @@ const print = std.debug.print;
 pub fn build(b: *Builder) void {
 
     {
-        const exe = b.addExecutable("main", "src/clbridge.zig");
+        const exe = b.addExecutable("clbridge", "src/clbridge.zig");
         exe.addIncludeDir("libs");  // CL/opencl.h
         exe.linkFramework("OpenCL");
         exe.addIncludeDir("/usr/local/include/");  // tiff.h

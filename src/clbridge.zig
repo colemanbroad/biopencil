@@ -286,7 +286,7 @@ pub const DevCtxQueProg = struct {
 
         // Spit out CL compiler errors if the build fails
         if (errCode != cl.CL_SUCCESS) {
-            var len: usize = 10_000;
+            var len: usize = 90_000;
             var lenOut: usize = undefined;
             var buffer = try al.alloc(u8, len);
             _ = cl.clGetProgramBuildInfo(program, device, cl.CL_PROGRAM_BUILD_LOG, len, &buffer[0], &lenOut);
@@ -581,14 +581,18 @@ pub fn boxImage() !Img3D(f32) {
     var img = try Img3D(f32).init(nx, ny, nz);
 
     for (img.img) |*v, i| {
-        const iz = (i / nx * ny) % nz; // should never exceed 34
+        const iz = (i / (nx * ny)) % nz; // should never exceed 34
         const iy = (i / nx) % ny;
         const ix = i % nx;
         var sum: u8 = 0;
         if (iz == 0 or iz == nz - 1) sum += 1;
         if (iy == 0 or iy == ny - 1) sum += 1;
         if (ix == 0 or ix == nx - 1) sum += 1;
-        if (sum >= 2) v.* = 1;
+        if (sum >= 2) 
+        { 
+            v.* = 1;
+            print("{} {} {} \n", .{iz,iy,ix,});
+        }
     }
 
     return img;
@@ -612,9 +616,9 @@ fn setPixel(surf: *cc.SDL_Surface, x: c_int, y: c_int, pixel: [4]u8) void {
     @intToPtr(*u32, target_pixel).* = @bitCast(u32, pixel);
 }
 
-fn setPixels(surf: *cc.SDL_Surface , buffer: [][4]u8) void {
+fn setPixels(surf: *cc.SDL_Surface, buffer: [][4]u8) void {
     _ = cc.SDL_LockSurface(surf);
-    var pix = @ptrCast([*c][4]u8 , surf.pixels.?);
+    var pix = @ptrCast([*c][4]u8, surf.pixels.?);
     for (buffer) |v, i| {
         pix[i] = v;
     }
@@ -715,29 +719,33 @@ pub fn main() !u8 {
     var arg_it = try std.process.argsWithAllocator(temp);
     _ = arg_it.skip(); // skip exe name
     const filename = arg_it.next() orelse testtifname;
-    // break :blk try std.fmt.parseUnsigned(usize, npts_str, 10);
+    // _ = filename;
 
-    const img = try readTIFF3D(temp, filename);
-    // Move TIFF image into standard buffer
-    const grey = try Img3D(f32).init(img.nx, img.ny, img.nz);
-    for (grey.img) |*v, i| {
-        v.* = @intToFloat(f32, img.img[i][0]) / 255;
-    }
+    const grey = blk: {
+        const img = try readTIFF3D(temp, filename);
+        const _gray = try Img3D(f32).init(img.nx, img.ny, img.nz);
+        for (_gray.img) |*v, i| {
+            v.* = @intToFloat(f32, img.img[i][0]) / 255;
+        }
+        break :blk _gray;
+    };
     // const grey = try boxImage();
 
     const t5 = std.time.milliTimestamp();
-
-    // Run max projection kernel
-    // var view_angle: [2]f32 = .{ 0, 0 };
-    var view_matrix: [9]f32 = .{1,0,0, 0,1,0, 0,0,1};
-    // var invM: [16]f32 = undefined;
-    // rotmatFromAngles(&invM, view_angle);
 
     var img_cl = try img2CLImg(grey, dcqp);
     var nx: u32 = @floatToInt(u32, @intToFloat(f32, grey.nx) * 1.5);
     var ny: u32 = @floatToInt(u32, @intToFloat(f32, grey.ny) * 1.5);
     var d_output = try temp.alloc([4]u8, nx * ny);
     var colormap = try temp.alloc([4]u8, 256);
+
+    var view = View{
+        .view_matrix = .{ 1, 0, 0, 0, 1, 0, 0, 0, 1 },
+        .front_scale = .{ 1.2, 1.2, 1 },
+        .back_scale = .{ 1.8, 1.8, 1 },
+        .anisotropy = .{ 1, 1, 4 },
+        .screen_size = .{ nx, ny },
+    };
 
     const mima = im.minmax(f32, grey.img);
 
@@ -754,12 +762,11 @@ pub fn main() !u8 {
         colormap,
         nx,
         ny,
-        // view_angle,
         mima,
-        &view_matrix,
+        view,
     };
 
-    var kernel = try Kernel("max_project_float", "xrwxxxw").init(dcqp, args);
+    var kernel = try Kernel("max_project_float", "xrwxxxx").init(dcqp, args);
     defer kernel.deinit();
 
     const t6 = std.time.milliTimestamp();
@@ -813,7 +820,7 @@ pub fn main() !u8 {
     // @compileLog("Type of surface is ", @TypeOf(surface));
 
     // Update window
-    setPixels(surface,d_output);
+    setPixels(surface, d_output);
 
     if (cc.SDL_UpdateWindowSurface(window) != 0) {
         cc.SDL_Log("Error updating window surface: %s", cc.SDL_GetError());
@@ -841,21 +848,21 @@ pub fn main() !u8 {
                         running = false;
                     }
                     if (event.key.keysym.sym == cc.SDLK_RIGHT) {
-                        view_matrix = matMulNNRowFirst(3,f32,view_matrix,delta.right);
+                        view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.right);
                         update = true;
                     }
                     if (event.key.keysym.sym == cc.SDLK_LEFT) {
-                        view_matrix = matMulNNRowFirst(3,f32,view_matrix,delta.left);
+                        view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.left);
                         update = true;
                         // print("view_angle {}\n", .{view_angle});
                     }
                     if (event.key.keysym.sym == cc.SDLK_UP) {
-                        view_matrix = matMulNNRowFirst(3,f32,view_matrix,delta.up);
+                        view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.up);
                         update = true;
                         // print("view_angle {}\n", .{view_angle});
                     }
                     if (event.key.keysym.sym == cc.SDLK_DOWN) {
-                        view_matrix = matMulNNRowFirst(3,f32,view_matrix,delta.down);
+                        view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.down);
                         update = true;
                         // print("view_angle {}\n", .{view_angle});
                     }
@@ -872,11 +879,11 @@ pub fn main() !u8 {
         update_count += 1;
 
         // perform the render and update the window
-        args = .{ img_cl, d_output, colormap, nx, ny, mima, &view_matrix };
+        args = .{ img_cl, d_output, colormap, nx, ny, mima, view };
         try kernel.executeKernel(dcqp, args, &.{ nx, ny });
         // _ = cl.clFinish(dcqp.command_queue);
 
-        setPixels(surface,d_output);
+        setPixels(surface, d_output);
 
         if (cc.SDL_UpdateWindowSurface(window) != 0) {
             cc.SDL_Log("Error updating window surface: %s", cc.SDL_GetError());
@@ -893,31 +900,112 @@ pub fn main() !u8 {
     return 0;
 }
 
+const V3 = @Vector(3, f32);
+const V2 = @Vector(2, f32);
+const U2 = @Vector(2, u32);
+
+const View = struct {
+    view_matrix: [9]f32, // orthonormal
+    front_scale: V3,
+    back_scale: V3,
+    anisotropy: V3,
+    screen_size: U2,
+};
+const Ray = struct { orig: V3, direc: V3 };
+
+fn U22V2(x: U2) V2 {
+    return V2{ @intToFloat(f32, x[0]), @intToFloat(f32, x[1]) };
+}
+
+fn pix2RayView(view: View, pix: U2) Ray {
+    const xy = U22V2(pix * U2{2,2}) / U22V2(view.screen_size + U2{ 1, 1 }) - V2{ 1, 1 }; // norm to [-1,1]
+    var front = V3{ xy[0], xy[1], -1 };
+    var back = V3{ xy[0], xy[1], 1 };
+    front *= view.front_scale;
+    back *= view.back_scale;
+    front = matVecMul33(view.view_matrix, front);
+    back = matVecMul33(view.view_matrix, back);
+    front *= view.anisotropy;
+    back *= view.anisotropy;
+
+    const direc = normV3(back - front);
+    return .{ .orig = front, .direc = direc };
+}
+
+test "test pix2RayView" {
+    var view = View{
+        .view_matrix = .{ 1, 0, 0, 0, 1, 0, 0, 0, 1 },
+        .front_scale = .{ 1.2, 1.2, 1 },
+        .back_scale = .{ 1.8, 1.8, 1 },
+        .anisotropy = .{ 1, 1, 4 },
+        .screen_size = .{ 340, 240 },
+    };
+
+    print("\n{}\n", .{pix2RayView(view, .{ 120, 120 })});
+}
+
+fn normV3(x: V3) V3 {
+    const s = @sqrt(@reduce(.Add, x*x));
+    return x / V3{ s, s, s };
+}
+
+fn pix2Ray(view_matrix: [9]f32) struct { front: [9]f32, back: [9]f32 } {
+    const Nx = 500;
+    const Ny = 500;
+
+    const front = blk: {
+        const FB = 1;
+        //  row first    { 1        , 2 , 3             , 4 , 5        , 6             , 7 , 8 , 9   }
+        const a = [9]f32{ 2 / (Nx - 1), 0, -2 / (Nx - 1) - 1, 0, 2 / (Ny - 1), -2 / (Ny - 1) - 1, 0, 0, FB }; // affine translate x , y to [-1 , 1]
+        const b = [9]f32{ 1.2, 0, 0, 0, 1.2, 0, 0, 0, 1.0 }; // scale front (back) plane to determine perspective
+        const c = view_matrix; // rotate
+        const d = [9]f32{ 1.0, 0, 0, 0, 1.0, 0, 0, 0, 4.0 }; // anisotropy
+        var res = matMulNNRowFirst(3, f32, b, a);
+        res = matMulNNRowFirst(3, f32, c, res);
+        res = matMulNNRowFirst(3, f32, d, res);
+        break :blk res;
+    };
+
+    const back = blk: {
+        const FB = -1;
+        //  row first    { 1        , 2 , 3             , 4 , 5        , 6             , 7 , 8 , 9   }
+        const a = [9]f32{ 2 / (Nx - 1), 0, -2 / (Nx - 1) - 1, 0, 2 / (Ny - 1), -2 / (Ny - 1) - 1, 0, 0, FB }; // affine translate x , y to [-1 , 1]
+        const b = [9]f32{ 1.8, 0, 0, 0, 1.8, 0, 0, 0, 1.0 }; // scale front (back) plane to determine perspective
+        const c = view_matrix; // rotate
+        const d = [9]f32{ 1.0, 0, 0, 0, 1.0, 0, 0, 0, 4.0 }; // anisotropy
+        var res = matMulNNRowFirst(3, f32, b, a);
+        res = matMulNNRowFirst(3, f32, c, res);
+        res = matMulNNRowFirst(3, f32, d, res);
+        break :blk res;
+    };
+
+    return .{ .front = front, .back = back };
+}
 
 const delta = struct {
-    const c = @cos(2*std.math.pi / 32.0);
-    const s = @sin(2*std.math.pi / 32.0);
+    const c = @cos(2 * std.math.pi / 32.0);
+    const s = @sin(2 * std.math.pi / 32.0);
 
     // rotate z to right, x into screen.
-    pub const right:[9]f32 = .{
-        c,0,s,
-        0,1,0,
-        -s,0,c,
+    pub const right: [9]f32 = .{
+        c,  0, s,
+        0,  1, 0,
+        -s, 0, c,
     };
-    pub const left:[9]f32 = .{
-        c,0,-s,
-        0,1,0,
-        s,0,c,
+    pub const left: [9]f32 = .{
+        c, 0, -s,
+        0, 1, 0,
+        s, 0, c,
     };
-    pub const up:[9]f32 = .{
-        1,0,0,
-        0,c,-s,
-        0,s,c,
+    pub const up: [9]f32 = .{
+        1, 0, 0,
+        0, c, -s,
+        0, s, c,
     };
-    pub const down:[9]f32 = .{
-        1,0,0,
-        0,c,s,
-        0,-s,c,
+    pub const down: [9]f32 = .{
+        1, 0,  0,
+        0, c,  s,
+        0, -s, c,
     };
 };
 
@@ -945,9 +1033,25 @@ fn rotmatFromAngles(invM: *[16]f32, view_angle: [2]f32) void {
     // for (int i=0; i<16; i++){invM[i] = _invM[i];}
 }
 
+pub fn matVecMul33(left: [9]f32, right: V3) V3 {
+    var res = V3{ 0, 0, 0 };
+    res += V3{ left[0 + 0], left[3 + 0], left[6 + 0] } * right;
+    res += V3{ left[0 + 1], left[3 + 1], left[6 + 1] } * right;
+    res += V3{ left[0 + 2], left[3 + 2], left[6 + 2] } * right;
+
+    // comptime {
+    //     var k = 0;
+    //     while (k<3) : (k+=1){
+    //         res += V3{left[0+k],left[3+k],left[6+k]} * right;
+    //     }
+    // }
+
+    return res;
+}
+
 pub fn matMulNNRowFirst(comptime n: u8, comptime T: type, left: [n * n]T, right: [n * n]T) [n * n]T {
     var result: [n * n]T = .{0} ** (n * n);
-    assert(n<128);
+    assert(n < 128);
     comptime {
         for (result) |*c, k| {
             var i = (k / n) * n;
