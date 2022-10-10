@@ -588,10 +588,13 @@ pub fn boxImage() !Img3D(f32) {
         if (iz == 0 or iz == nz - 1) sum += 1;
         if (iy == 0 or iy == ny - 1) sum += 1;
         if (ix == 0 or ix == nx - 1) sum += 1;
-        if (sum >= 2) 
-        { 
+        if (sum >= 2) {
             v.* = 1;
-            print("{} {} {} \n", .{iz,iy,ix,});
+            print("{} {} {} \n", .{
+                iz,
+                iy,
+                ix,
+            });
         }
     }
 
@@ -736,8 +739,10 @@ pub fn main() !u8 {
     var img_cl = try img2CLImg(grey, dcqp);
     var nx: u32 = @floatToInt(u32, @intToFloat(f32, grey.nx) * 1.5);
     var ny: u32 = @floatToInt(u32, @intToFloat(f32, grey.ny) * 1.5);
-    var d_output = try temp.alloc([4]u8, nx * ny);
-    var colormap = try temp.alloc([4]u8, 256);
+    var d_output = try Img2D([4]u8).init(nx, ny);
+    // var d_output = try temp.alloc([4]u8, nx * ny);
+    // var colormap = try temp.alloc([4]u8, 256);
+    const colormap = @import("cmap.zig").colormap_cool[0..];
 
     var view = View{
         .view_matrix = .{ 1, 0, 0, 0, 1, 0, 0, 0, 1 },
@@ -749,16 +754,16 @@ pub fn main() !u8 {
 
     const mima = im.minmax(f32, grey.img);
 
-    for (colormap) |*v, i| v.* = .{
-        @intCast(u8, i), // Blue
-        @intCast(u8, 255 - i), // Green
-        @intCast(u8, 255 - i), // Red
-        255,
-    };
+    // for (colormap) |*v, i| v.* = .{
+    //     @intCast(u8, i), // Blue
+    //     @intCast(u8, 255 - i), // Green
+    //     @intCast(u8, 255 - i), // Red
+    //     255,
+    // };
 
     var args = .{
         img_cl,
-        d_output,
+        d_output.img,
         colormap,
         nx,
         ny,
@@ -820,7 +825,8 @@ pub fn main() !u8 {
     // @compileLog("Type of surface is ", @TypeOf(surface));
 
     // Update window
-    setPixels(surface, d_output);
+    addBBox(d_output, view);
+    setPixels(surface, d_output.img);
 
     if (cc.SDL_UpdateWindowSurface(window) != 0) {
         cc.SDL_Log("Error updating window surface: %s", cc.SDL_GetError());
@@ -879,11 +885,12 @@ pub fn main() !u8 {
         update_count += 1;
 
         // perform the render and update the window
-        args = .{ img_cl, d_output, colormap, nx, ny, mima, view };
+        args = .{ img_cl, d_output.img, colormap, nx, ny, mima, view };
         try kernel.executeKernel(dcqp, args, &.{ nx, ny });
         // _ = cl.clFinish(dcqp.command_queue);
 
-        setPixels(surface, d_output);
+        addBBox(d_output, view);
+        setPixels(surface, d_output.img);
 
         if (cc.SDL_UpdateWindowSurface(window) != 0) {
             cc.SDL_Log("Error updating window surface: %s", cc.SDL_GetError());
@@ -918,18 +925,208 @@ fn U22V2(x: U2) V2 {
 }
 
 fn pix2RayView(view: View, pix: U2) Ray {
-    const xy = U22V2(pix * U2{2,2}) / U22V2(view.screen_size + U2{ 1, 1 }) - V2{ 1, 1 }; // norm to [-1,1]
+    const xy = U22V2(pix * U2{ 2, 2 }) / U22V2(view.screen_size + U2{ 1, 1 }) - V2{ 1, 1 }; // norm to [-1,1]
+    // (xy + 1) * (sz + 1) / 2 = pix;
+    // const xy = .{pix[0]*2 / }
+    // print("xy = {}\n",.{xy});
     var front = V3{ xy[0], xy[1], -1 };
     var back = V3{ xy[0], xy[1], 1 };
+    // print("1. front = {}\n",.{front});
     front *= view.front_scale;
     back *= view.back_scale;
+    // print("2. front = {}\n",.{front});
     front = matVecMul33(view.view_matrix, front);
     back = matVecMul33(view.view_matrix, back);
+    // print("3. front = {}\n",.{front});
     front *= view.anisotropy;
     back *= view.anisotropy;
+    // print("4. front = {}\n",.{front});
 
     const direc = normV3(back - front);
     return .{ .orig = front, .direc = direc };
+}
+
+fn vol2PixView(view: View, _pt: V3) V2 {
+
+    // @breakpoint();
+    var pt = _pt;
+    // print("1. pt= {}\n", .{pt});
+    pt /= view.anisotropy;
+    // print("2. pt= {}\n", .{pt});
+    const inv = invert3x3(view.view_matrix);
+    // print("mat= {d}\n",.{view.view_matrix});
+    // print("inv= {d}\n",.{inv});
+    pt = matVecMul33(inv, pt);
+    // print("3. pt= {}\n", .{pt});
+    // to get scale correct do a lerp between front_scale and back_scale, independently for each dimension.
+    const scaleX = lerp(-1 * view.front_scale[2], pt[2], 1 * view.back_scale[2], view.front_scale[0], view.back_scale[0]);
+    const scaleY = lerp(-1 * view.front_scale[2], pt[2], 1 * view.back_scale[2], view.front_scale[1], view.back_scale[1]);
+    const x = (pt[0] / scaleX + 1) / 2 * @intToFloat(f32, view.screen_size[0] + 1);
+    const y = (pt[1] / scaleY + 1) / 2 * @intToFloat(f32, view.screen_size[1] + 1);
+    // print("4. xy= {}\n", .{.{x,y}});
+
+    return .{ x, y };
+}
+
+test "test vol2PixView" {
+    // pub fn main() !void {
+    print("\n", .{});
+
+    const c = @cos(2 * 3.14159 / 6.0);
+    const s = @sin(2 * 3.14159 / 6.0);
+    var view = View{
+        .view_matrix = .{ c, s, 0, -s, c, 0, 0, 0, 1 },
+        .front_scale = .{ 1.2, 1.2, 1 },
+        .back_scale = .{ 1.8, 1.8, 1 },
+        .anisotropy = .{ 1, 1, 4 },
+        .screen_size = .{ 340, 240 },
+    };
+
+    {
+        const px0 = U2{ 0, 240 };
+        const r = pix2RayView(view, px0);
+        const y = r.orig + V3{ 4, 4, 4 } * r.direc;
+        const pix = vol2PixView(view, y);
+        const px1 = U2{ @floatToInt(u32, @floor(pix[0])), @floatToInt(u32, @floor(pix[1])) };
+        try expect(@reduce(.And, px0 == px1));
+    }
+
+    {
+        const px0 = U2{ 100, 200 };
+        const r = pix2RayView(view, px0);
+        const y = r.orig + V3{ 4, 4, 4 } * r.direc;
+        const pix = vol2PixView(view, y);
+        const px1 = U2{ @floatToInt(u32, @floor(pix[0])), @floatToInt(u32, @floor(pix[1])) };
+        try expect(@reduce(.And, px0 == px1));
+    }
+
+    // FAIL
+    const pixlist = [_]U2{
+        U2{ 0, 240 },
+        U2{ 0, 360 },
+        U2{ 1, 240 },
+        U2{ 10, 180 },
+        U2{ 30, 100 },
+        U2{ 31, 101 },
+        U2{ 7, 233 },
+        U2{ 7, 353 },
+        U2{ 8, 233 },
+        U2{ 17, 173 },
+        U2{ 37, 93 },
+        U2{ 38, 94 },
+    };
+
+    for (pixlist) |px0| {
+        // const px0 = U2{10,240};
+        const r = pix2RayView(view, px0);
+        const y = r.orig + V3{ 4, 4, 4 } * r.direc;
+        const pix = vol2PixView(view, y);
+        const px1 = U2{ @floatToInt(u32, @floor(pix[0])), @floatToInt(u32, @floor(pix[1])) };
+        expect(@reduce(.And, px0 == px1)) catch {
+            print("pix {} fail\n", .{px0});
+        };
+    }
+}
+
+fn V22U2(x: V2) U2 {
+    return U2{ @floatToInt(u32, x[0]), @floatToInt(u32, x[1]) };
+}
+
+fn addBBox(img: Img2D([4]u8), view: View) void {
+
+    const lines = [_][2]V3{
+        // draw along x
+        .{.{ -1, -1, -1 } , .{ 1, -1, -1 }},
+        .{.{ -1,  1, -1 } , .{ 1,  1, -1 }},
+        .{.{ -1,  1,  1 } , .{ 1,  1,  1 }},
+        .{.{ -1, -1,  1 } , .{ 1, -1,  1 }},
+
+        // draw along y
+        .{.{ -1, -1, -1  } , .{-1,  1, -1 }},
+        .{.{ -1, -1,  1  } , .{-1,  1,  1 }},
+        .{.{  1, -1,  -1 } , .{ 1,  1, -1 }},
+        .{.{  1, -1,   1 } , .{ 1,  1,  1 }},
+
+        // draw along z
+        .{.{ -1, -1, -1 } , .{-1, -1,  1 }},
+        .{.{ -1,  1, -1 } , .{-1,  1,  1 }},
+        .{.{  1, -1, -1 } , .{ 1, -1,  1 }},
+        .{.{  1,  1, -1 } , .{ 1,  1,  1 }},
+    };
+
+    inline for (lines) |x0x1|
+    {
+    const x0 = vol2PixView(view, x0x1[0]);
+    const x1 = vol2PixView(view, x0x1[1]);
+    im.drawLineInBounds(
+        [4]u8,
+        img,
+        @floatToInt(i32, x0[0]),
+        @floatToInt(i32, x0[1]),
+        @floatToInt(i32, x1[0]),
+        @floatToInt(i32, x1[1]),
+        .{ 255, 255, 255, 255 },
+    );
+    }
+}
+
+//
+// Basic Math
+//
+
+test "test lerp" {
+    print("\n", .{});
+    print("lerp = {} \n", .{lerp(0, 0.5, 1, 1, 2)});
+    print("lerp = {} \n", .{lerp(-1, 1, 1, 1, 2)});
+    print("lerp = {} \n", .{lerp(-1, 1, 1, 1, 2)});
+}
+
+fn lerp(lo: f32, mid: f32, hi: f32, valLo: f32, valHi: f32) f32 {
+    return valLo * (hi - mid) / (hi - lo) + valHi * (mid - lo) / (hi - lo);
+}
+
+// Requires XYZ order (or some rotation thereof)
+pub fn cross(a: V3, b: V3) V3 {
+    return V3{
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    };
+}
+
+pub fn dot(a: V3, b: V3) f32 {
+    // return a[0] * b[0] + a[1] * b[1] + a[2] * b[2] ;
+    return @reduce(.Add, a * b);
+}
+
+pub fn invert3x3(mat: [9]f32) [9]f32 {
+    const v1 = mat[0..3].*;
+    const v2 = mat[3..6].*;
+    const v3 = mat[6..9].*;
+    const v1v2 = cross(v1, v2);
+    const v2v3 = cross(v2, v3);
+    const v3v1 = cross(v3, v1);
+    const d = dot(v1, v2v3);
+    return [9]f32{
+        v2v3[0] / d,
+        v3v1[0] / d,
+        v1v2[0] / d,
+        v2v3[1] / d,
+        v3v1[1] / d,
+        v1v2[1] / d,
+        v2v3[2] / d,
+        v3v1[2] / d,
+        v1v2[2] / d,
+    };
+}
+
+test "test invert3x3" {
+    const a = [9]f32{ 0.58166294, 0.33293927, 0.81886478, 0.63398062, 0.85116383, 0.8195473, 0.83363027, 0.52720334, 0.17217296 };
+    const b = [9]f32{ 0.05057727, 0.00987139, 0.74565127, 0.42741473, 0.34184494, 0.37298805, 0.3842003, 0.48188364, 0.16291618 };
+    // const c = [9]f32{ 0.48633017, 0.51415297, 0.6913064, 0.71073529, 0.69215076, 0.9237199, 0.33364612, 0.27141822, 0.84628778 };
+    const d = matMulNNRowFirst(3, f32, a, b);
+    const e = matMulNNRowFirst(3, f32, invert3x3(a), d);
+    print("\nb = {d}\ne = {d}\n", .{ b, e });
 }
 
 test "test pix2RayView" {
@@ -945,7 +1142,7 @@ test "test pix2RayView" {
 }
 
 fn normV3(x: V3) V3 {
-    const s = @sqrt(@reduce(.Add, x*x));
+    const s = @sqrt(@reduce(.Add, x * x));
     return x / V3{ s, s, s };
 }
 
@@ -1035,18 +1232,17 @@ fn rotmatFromAngles(invM: *[16]f32, view_angle: [2]f32) void {
 
 pub fn matVecMul33(left: [9]f32, right: V3) V3 {
     var res = V3{ 0, 0, 0 };
-    res += V3{ left[0 + 0], left[3 + 0], left[6 + 0] } * right;
-    res += V3{ left[0 + 1], left[3 + 1], left[6 + 1] } * right;
-    res += V3{ left[0 + 2], left[3 + 2], left[6 + 2] } * right;
-
-    // comptime {
-    //     var k = 0;
-    //     while (k<3) : (k+=1){
-    //         res += V3{left[0+k],left[3+k],left[6+k]} * right;
-    //     }
-    // }
+    res[0] = @reduce(.Add, @as(V3, left[0..3].*) * right);
+    res[1] = @reduce(.Add, @as(V3, left[3..6].*) * right);
+    res[2] = @reduce(.Add, @as(V3, left[6..9].*) * right);
 
     return res;
+}
+
+test "test matVecMul33" {
+    const a = V3{ 1, 0, 0 };
+    const b = [9]f32{ 1, 0, 0, 0, 2, 0, 0, 0, 3 };
+    print("a*b = {d}\n", .{matVecMul33(b, a)});
 }
 
 pub fn matMulNNRowFirst(comptime n: u8, comptime T: type, left: [n * n]T, right: [n * n]T) [n * n]T {
