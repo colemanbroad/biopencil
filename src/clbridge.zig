@@ -484,8 +484,6 @@ pub fn Kernel(
 
             errCode = cl.clEnqueueNDRangeKernel(dcqp.command_queue, self.kernel, @intCast(u32, nproc.len), null, &nproc[0], null, 0, null, null);
             try testForCLError(errCode);
-            // print("Ran the Kernel\n", .{});
-            // print("Reading results...\n", .{});
 
             inline for (argtype) |argT, i| {
                 if (argT == 'r') {
@@ -611,13 +609,13 @@ const SDL_WINDOWPOS_UNDEFINED = @bitCast(c_int, cc.SDL_WINDOWPOS_UNDEFINED_MASK)
 extern fn SDL_GetWindowSurface(window: *cc.SDL_Window) ?*cc.SDL_Surface;
 
 /// deprecated
-fn setPixel(surf: *cc.SDL_Surface, x: c_int, y: c_int, pixel: [4]u8) void {
-    const target_pixel = @ptrToInt(surf.pixels) +
-        @intCast(usize, y) * @intCast(usize, surf.pitch) +
-        @intCast(usize, x) * 4;
-    // @breakpoint();
-    @intToPtr(*u32, target_pixel).* = @bitCast(u32, pixel);
-}
+// fn setPixel(surf: *cc.SDL_Surface, x: c_int, y: c_int, pixel: [4]u8) void {
+//     const target_pixel = @ptrToInt(surf.pixels) +
+//         @intCast(usize, y) * @intCast(usize, surf.pitch) +
+//         @intCast(usize, x) * 4;
+//     // @breakpoint();
+//     @intToPtr(*u32, target_pixel).* = @bitCast(u32, pixel);
+// }
 
 fn setPixels(surf: *cc.SDL_Surface, buffer: [][4]u8) void {
     _ = cc.SDL_LockSurface(surf);
@@ -742,12 +740,15 @@ pub fn main() !u8 {
     var d_output = try Img2D([4]u8).init(nx, ny);
     // var d_output = try temp.alloc([4]u8, nx * ny);
     // var colormap = try temp.alloc([4]u8, 256);
-    const colormap = @import("cmap.zig").colormap_cool[0..];
+    // const colormap = @import("cmap.zig").colormap_cool[0..];
+    const colormap = cmapCool();
+
+    @breakpoint();
 
     var view = View{
         .view_matrix = .{ 1, 0, 0, 0, 1, 0, 0, 0, 1 },
-        .front_scale = .{ 1.2, 1.2, 1 },
-        .back_scale = .{ 1.8, 1.8, 1 },
+        .front_scale = .{ 1.1, 1.1, 1 },
+        .back_scale = .{ 2.3, 2.3, 1 },
         .anisotropy = .{ 1, 1, 4 },
         .screen_size = .{ nx, ny },
     };
@@ -907,6 +908,74 @@ pub fn main() !u8 {
     return 0;
 }
 
+/// _cool_data = {'red':   ((0., 0., 0.), (1.0, 1.0, 1.0)),
+///             'green': ((0., 1., 1.), (1.0, 0.,  0.)),
+///             'blue':  ((0., 1., 1.), (1.0, 1.,  1.))}
+fn cmapCool() [256][4]u8 {
+    var res: [256][4]u8 = undefined;
+    const reds = piecewiseLinearInterpolation(&[_][3]f32{ .{ 0, 0, 0 }, .{ 1, 1, 1 } });
+    const greens = piecewiseLinearInterpolation(&[_][3]f32{ .{ 0, 1, 1 }, .{ 1, 0, 0 } });
+    const blues = piecewiseLinearInterpolation(&[_][3]f32{ .{ 0, 1, 1 }, .{ 1, 1, 1 } });
+    for (res) |*r, i| {
+        r.* = .{
+            @floatToInt(u8, reds[i] * 255),
+            @floatToInt(u8, greens[i] * 255),
+            @floatToInt(u8, blues[i] * 255),
+            255,
+        };
+    }
+    return res;
+}
+
+/// Max of ten segments per color
+const LSCmap = struct {
+    red: [10]?[3]f32,
+    green: [10]?[3]f32,
+    blue: [10]?[3]f32,
+};
+
+fn piecewiseLinearInterpolation(pieces: []const [3]f32) [256]f32 {
+    var res = [_]f32{0} ** 256;
+    var k: usize = 0;
+    for (res) |*r, i| {
+        const x = @intToFloat(f32, i) / 255; // in [0,1] inclusive
+        if (x > pieces[k + 1][0]) k += 1;
+        const x0 = pieces[k][0];
+        // print("\n{d}\n",.{pieces[k+1]});
+        const x1 = pieces[k + 1][0];
+        const y0 = pieces[k][2];
+        const y1 = pieces[k + 1][1];
+        const y = lerp(x0, x, x1, y0, y1);
+        // if (k == 1) @breakpoint();
+        // print("")
+        r.* = y;
+    }
+    return res;
+}
+
+test "test piecewiseLinearInterp" {
+    // pub fn main() void {
+    var pieces = [_][3]f32{
+        .{ 0, 0, 1.0 },
+        .{ 0.25, 0, 1 },
+        .{ 0.75, 0.0, 1 },
+        .{ 1.0, 0.0, 1 },
+    };
+    const res = piecewiseLinearInterpolation(pieces[0..]);
+    print("\nres = {d}\n", .{res});
+}
+
+// fn linearSegmentedColormap(cmap: LSCmap) [256][4]u5 {
+//     res = [_][4]u8{0} ** 256;
+//     var r_idx:u8 = 0;
+//     var g_idx:u8 = 0;
+//     var b_idx:u8 = 0;
+//     for (res) |*r, i| {
+//         const x = @intToFloat(f32, i) / 255;
+//         const y = lerp(x0,x,x1,y0,y1)
+//     }
+// }
+
 const V3 = @Vector(3, f32);
 const V2 = @Vector(2, f32);
 const U2 = @Vector(2, u32);
@@ -920,12 +989,13 @@ const View = struct {
 };
 const Ray = struct { orig: V3, direc: V3 };
 
-fn U22V2(x: U2) V2 {
+fn u22V2(x: U2) V2 {
     return V2{ @intToFloat(f32, x[0]), @intToFloat(f32, x[1]) };
 }
 
-fn pix2RayView(view: View, pix: U2) Ray {
-    const xy = U22V2(pix * U2{ 2, 2 }) / U22V2(view.screen_size + U2{ 1, 1 }) - V2{ 1, 1 }; // norm to [-1,1]
+/// maps a pixel on the camera to a ray that points into the image volume.
+fn pixelToRay(view: View, pix: U2) Ray {
+    const xy = u22V2(pix * U2{ 2, 2 }) / u22V2(view.screen_size + U2{ 1, 1 }) - V2{ 1, 1 }; // norm to [-1,1]
     // (xy + 1) * (sz + 1) / 2 = pix;
     // const xy = .{pix[0]*2 / }
     // print("xy = {}\n",.{xy});
@@ -946,7 +1016,9 @@ fn pix2RayView(view: View, pix: U2) Ray {
     return .{ .orig = front, .direc = direc };
 }
 
-fn vol2PixView(view: View, _pt: V3) V2 {
+/// Maps a point inside the image volume in normalized [-1,1] coordinates
+/// to a pixel on the camera.
+fn pointToPixel(view: View, _pt: V3) V2 {
 
     // @breakpoint();
     var pt = _pt;
@@ -984,18 +1056,18 @@ test "test vol2PixView" {
 
     {
         const px0 = U2{ 0, 240 };
-        const r = pix2RayView(view, px0);
+        const r = pixelToRay(view, px0);
         const y = r.orig + V3{ 4, 4, 4 } * r.direc;
-        const pix = vol2PixView(view, y);
+        const pix = pointToPixel(view, y);
         const px1 = U2{ @floatToInt(u32, @floor(pix[0])), @floatToInt(u32, @floor(pix[1])) };
         try expect(@reduce(.And, px0 == px1));
     }
 
     {
         const px0 = U2{ 100, 200 };
-        const r = pix2RayView(view, px0);
+        const r = pixelToRay(view, px0);
         const y = r.orig + V3{ 4, 4, 4 } * r.direc;
-        const pix = vol2PixView(view, y);
+        const pix = pointToPixel(view, y);
         const px1 = U2{ @floatToInt(u32, @floor(pix[0])), @floatToInt(u32, @floor(pix[1])) };
         try expect(@reduce(.And, px0 == px1));
     }
@@ -1018,9 +1090,9 @@ test "test vol2PixView" {
 
     for (pixlist) |px0| {
         // const px0 = U2{10,240};
-        const r = pix2RayView(view, px0);
+        const r = pixelToRay(view, px0);
         const y = r.orig + V3{ 4, 4, 4 } * r.direc;
-        const pix = vol2PixView(view, y);
+        const pix = pointToPixel(view, y);
         const px1 = U2{ @floatToInt(u32, @floor(pix[0])), @floatToInt(u32, @floor(pix[1])) };
         expect(@reduce(.And, px0 == px1)) catch {
             print("pix {} fail\n", .{px0});
@@ -1028,45 +1100,43 @@ test "test vol2PixView" {
     }
 }
 
-fn V22U2(x: V2) U2 {
+fn v22U2(x: V2) U2 {
     return U2{ @floatToInt(u32, x[0]), @floatToInt(u32, x[1]) };
 }
 
 fn addBBox(img: Img2D([4]u8), view: View) void {
-
     const lines = [_][2]V3{
         // draw along x
-        .{.{ -1, -1, -1 } , .{ 1, -1, -1 }},
-        .{.{ -1,  1, -1 } , .{ 1,  1, -1 }},
-        .{.{ -1,  1,  1 } , .{ 1,  1,  1 }},
-        .{.{ -1, -1,  1 } , .{ 1, -1,  1 }},
+        .{ .{ -1, -1, -1 }, .{ 1, -1, -1 } },
+        .{ .{ -1, 1, -1 }, .{ 1, 1, -1 } },
+        .{ .{ -1, 1, 1 }, .{ 1, 1, 1 } },
+        .{ .{ -1, -1, 1 }, .{ 1, -1, 1 } },
 
         // draw along y
-        .{.{ -1, -1, -1  } , .{-1,  1, -1 }},
-        .{.{ -1, -1,  1  } , .{-1,  1,  1 }},
-        .{.{  1, -1,  -1 } , .{ 1,  1, -1 }},
-        .{.{  1, -1,   1 } , .{ 1,  1,  1 }},
+        .{ .{ -1, -1, -1 }, .{ -1, 1, -1 } },
+        .{ .{ -1, -1, 1 }, .{ -1, 1, 1 } },
+        .{ .{ 1, -1, -1 }, .{ 1, 1, -1 } },
+        .{ .{ 1, -1, 1 }, .{ 1, 1, 1 } },
 
         // draw along z
-        .{.{ -1, -1, -1 } , .{-1, -1,  1 }},
-        .{.{ -1,  1, -1 } , .{-1,  1,  1 }},
-        .{.{  1, -1, -1 } , .{ 1, -1,  1 }},
-        .{.{  1,  1, -1 } , .{ 1,  1,  1 }},
+        .{ .{ -1, -1, -1 }, .{ -1, -1, 1 } },
+        .{ .{ -1, 1, -1 }, .{ -1, 1, 1 } },
+        .{ .{ 1, -1, -1 }, .{ 1, -1, 1 } },
+        .{ .{ 1, 1, -1 }, .{ 1, 1, 1 } },
     };
 
-    inline for (lines) |x0x1|
-    {
-    const x0 = vol2PixView(view, x0x1[0]);
-    const x1 = vol2PixView(view, x0x1[1]);
-    im.drawLineInBounds(
-        [4]u8,
-        img,
-        @floatToInt(i32, x0[0]),
-        @floatToInt(i32, x0[1]),
-        @floatToInt(i32, x1[0]),
-        @floatToInt(i32, x1[1]),
-        .{ 255, 255, 255, 255 },
-    );
+    inline for (lines) |x0x1| {
+        const x0 = pointToPixel(view, x0x1[0]);
+        const x1 = pointToPixel(view, x0x1[1]);
+        im.drawLineInBounds(
+            [4]u8,
+            img,
+            @floatToInt(i32, x0[0]),
+            @floatToInt(i32, x0[1]),
+            @floatToInt(i32, x1[0]),
+            @floatToInt(i32, x1[1]),
+            .{ 255, 255, 255, 255 },
+        );
     }
 }
 
@@ -1138,7 +1208,7 @@ test "test pix2RayView" {
         .screen_size = .{ 340, 240 },
     };
 
-    print("\n{}\n", .{pix2RayView(view, .{ 120, 120 })});
+    print("\n{}\n", .{pixelToRay(view, .{ 120, 120 })});
 }
 
 fn normV3(x: V3) V3 {

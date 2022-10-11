@@ -111,20 +111,20 @@ pub fn isin(x: anytype, container: anytype) bool {
     return false;
 }
 
-var shared_global:u8 = 0;
+var shared_global: u8 = 0;
 
 test "test isin" {
     shared_global += 1;
-    print("test isin shared_global = {}\n",.{shared_global});
+    print("test isin shared_global = {}\n", .{shared_global});
     try expect(isin(3, .{ 1, 2, 3, 4, 5 }));
     try expect(isin('a', .{ 1, 'a', 3, 4, 5 }));
     try expect(!isin(3.9, .{ 1, 2, 3, 4, 5.0 }));
-    try expect(2==3); //catch return error.ArithmeticError;
+    try expect(2 == 3); //catch return error.ArithmeticError;
     // expect(3==3) catch print("\nexpect(3==3)\n",.{});
     // expect(4==3) catch print("\nexpect(4==3)\n",.{});
 }
 
-pub fn norm01(comptime T:type, img: []T) void {
+pub fn norm01(comptime T: type, img: []T) void {
     // const T = @TypeOf(img).pixtype;
     comptime assert(isin(T, .{ f16, f32, f64, i8, u8, i16, u16, i32, u32, i64, u64 }));
     // var min:T = 0;
@@ -137,12 +137,12 @@ const eql = std.mem.eql;
 
 test "test norm()" {
     shared_global += 1;
-    print("test norm() shared_global = {}\n",.{shared_global});
+    print("test norm() shared_global = {}\n", .{shared_global});
 
-    try expect(3==4);
+    try expect(3 == 4);
     var pic = try Img2D(f32).init(100, 101);
     for (pic.img) |*v, i| v.* = @intToFloat(f32, i % 255);
-    norm01(f32,pic.img);
+    norm01(f32, pic.img);
     try expect(eql(f32, &minmax(f32, pic.img), &.{ 0.0, 1.0 }));
 }
 
@@ -166,53 +166,53 @@ pub fn normAffineNoErr(data: []f32, mn: f32, mx: f32) void {
 }
 
 /// deprecated
-pub fn saveF32AsTGAGreyNormed(
-    data: []f32,
-    h: u16,
-    w: u16,
-    name: []const u8,
-) !void {
-    const rgba = try allocator.alloc(u8, 4 * data.len);
-    defer allocator.free(rgba);
-    // for (rgba) |*v, i| v.* = if (i % 4 == 3) 255 else clamp(@floatToInt(u8,data[i / 4]),0,255);
-    const mnmx = minmax(f32, data);
-    normAffineNoErr(data, mnmx[0], mnmx[1]);
-    for (rgba) |*v, i| v.* = if (i % 4 == 3) 255 else @floatToInt(u8, data[i / 4] * 255); // get negative value?
-    try saveU8AsTGA(rgba, h, w, name);
-}
+// pub fn saveF32AsTGAGreyNormed(
+//     data: []f32,
+//     h: u16,
+//     w: u16,
+//     name: []const u8,
+// ) !void {
+//     const rgba = try allocator.alloc(u8, 4 * data.len);
+//     defer allocator.free(rgba);
+//     // for (rgba) |*v, i| v.* = if (i % 4 == 3) 255 else clamp(@floatToInt(u8,data[i / 4]),0,255);
+//     const mnmx = minmax(f32, data);
+//     normAffineNoErr(data, mnmx[0], mnmx[1]);
+//     for (rgba) |*v, i| v.* = if (i % 4 == 3) 255 else @floatToInt(u8, data[i / 4] * 255); // get negative value?
+//     try saveU8AsTGA(rgba, h, w, name);
+// }
 
 /// deprecated
-pub fn saveF32AsTGAGreyNormedCam(
-    cam: anytype,
-    name: []const u8,
-) !void {
-    const rgba = try allocator.alloc(u8, 4 * cam.screen.len);
-    defer allocator.free(rgba);
-    // for (rgba) |*v, i| v.* = if (i % 4 == 3) 255 else clamp(@floatToInt(u8,cam[i / 4]),0,255);
-    const mnmx = minmax(f32, cam.screen);
-    normAffineNoErr(cam.screen, mnmx[0], mnmx[1]);
-    for (rgba) |*v, i| v.* = if (i % 4 == 3) 255 else @floatToInt(u8, cam.screen[i / 4] * 255); // get negative value?
-    try saveU8AsTGA(rgba, @intCast(u16, cam.nyPixels), @intCast(u16, cam.nxPixels), name);
-}
+// pub fn saveF32AsTGAGreyNormedCam(
+//     cam: anytype,
+//     name: []const u8,
+// ) !void {
+//     const rgba = try allocator.alloc(u8, 4 * cam.screen.len);
+//     defer allocator.free(rgba);
+//     // for (rgba) |*v, i| v.* = if (i % 4 == 3) 255 else clamp(@floatToInt(u8,cam[i / 4]),0,255);
+//     const mnmx = minmax(f32, cam.screen);
+//     normAffineNoErr(cam.screen, mnmx[0], mnmx[1]);
+//     for (rgba) |*v, i| v.* = if (i % 4 == 3) 255 else @floatToInt(u8, cam.screen[i / 4] * 255); // get negative value?
+//     try saveU8AsTGA(rgba, @intCast(u16, cam.nyPixels), @intCast(u16, cam.nxPixels), name);
+// }
 
 /// deprecated
-pub fn saveF32Img2D(img: Img2D(f32), name: []const u8) !void {
-    const rgba = try allocator.alloc(u8, 4 * img.img.len);
-    defer allocator.free(rgba);
-    // for (rgba) |*v, i| v.* = if (i % 4 == 3) 255 else clamp(@floatToInt(u8,img.img[i / 4]),0,255);
-    const mnmx = minmax(f32, img.img);
-    normAffineNoErr(img.img, mnmx[0], mnmx[1]);
-    for (rgba) |*v, i| v.* = if (i % 4 == 3) 255 else @floatToInt(u8, img.img[i / 4] * 255); // get negative value?
-    try saveU8AsTGA(rgba, @intCast(u16, img.ny), @intCast(u16, img.nx), name);
-}
+// pub fn saveF32Img2D(img: Img2D(f32), name: []const u8) !void {
+//     const rgba = try allocator.alloc(u8, 4 * img.img.len);
+//     defer allocator.free(rgba);
+//     // for (rgba) |*v, i| v.* = if (i % 4 == 3) 255 else clamp(@floatToInt(u8,img.img[i / 4]),0,255);
+//     const mnmx = minmax(f32, img.img);
+//     normAffineNoErr(img.img, mnmx[0], mnmx[1]);
+//     for (rgba) |*v, i| v.* = if (i % 4 == 3) 255 else @floatToInt(u8, img.img[i / 4] * 255); // get negative value?
+//     try saveU8AsTGA(rgba, @intCast(u16, img.ny), @intCast(u16, img.nx), name);
+// }
 
 /// deprecated
-pub fn saveU8AsTGAGrey(data: []u8, h: u16, w: u16, name: []const u8) !void {
-    const rgba = try allocator.alloc(u8, 4 * data.len);
-    defer allocator.free(rgba);
-    for (rgba) |*v, i| v.* = if (i % 4 == 3) 255 else data[i / 4];
-    try saveU8AsTGA(rgba, h, w, name);
-}
+// pub fn saveU8AsTGAGrey(data: []u8, h: u16, w: u16, name: []const u8) !void {
+//     const rgba = try allocator.alloc(u8, 4 * data.len);
+//     defer allocator.free(rgba);
+//     for (rgba) |*v, i| v.* = if (i % 4 == 3) 255 else data[i / 4];
+//     try saveU8AsTGA(rgba, h, w, name);
+// }
 
 pub fn saveU8AsTGA(data: []u8, h: u16, w: u16, name: []const u8) !void {
 
