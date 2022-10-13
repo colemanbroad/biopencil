@@ -286,6 +286,33 @@ pub fn myabs(a: anytype) @TypeOf(a) {
     if (a < 0) return -a else return a;
 }
 
+pub fn drawLine2(img: [*][4]u8, nx:u31, _x0: u31, _y0: u31, x1: u31, y1: u31, val: [4]u8) void {
+    var x0: i32 = _x0;
+    var y0: i32 = _y0;
+    const dx = myabs(x1 - x0);
+    const sx: i8 = if (x0 < x1) 1 else -1;
+    const dy = -myabs(y1 - y0);
+    const sy: i8 = if (y0 < y1) 1 else -1;
+    var err: i32 = dx + dy; //
+    var e2: i32 = 0;
+
+    while (true) {
+        const idx = @intCast(u32, x0) + nx * @intCast(u32, y0);
+        img[idx] = val;
+        e2 = 2 * err;
+        if (e2 >= dy) {
+            if (x0 == x1) break;
+            err += dy;
+            x0 += sx;
+        }
+        if (e2 <= dx) {
+            if (y0 == y1) break;
+            err += dx;
+            y0 += sy;
+        }
+    }
+}
+
 pub fn drawLine(comptime T: type, img: Img2D(T), _x0: u31, _y0: u31, x1: u31, y1: u31, val: T) void {
     var x0: i32 = _x0;
     var y0: i32 = _y0;

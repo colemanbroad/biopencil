@@ -8,7 +8,6 @@ const eql = std.mem.eql;
 const Img2D = im.Img2D;
 const Img3D = im.Img3D;
 
-
 const cc = struct {
     pub const cl = @cImport({
         @cDefine("CL_TARGET_OPENCL_VERSION", "220");
@@ -30,7 +29,6 @@ const cl = cc.cl;
 ///
 ///  BEGIN OpenCL Helpers
 ///
-
 pub fn testForCLError(val: cl.cl_int) CLERROR!void {
     const maybeErr = switch (val) {
         0 => cl.CL_SUCCESS,
@@ -573,10 +571,10 @@ pub fn img2CLImg(
     return climg;
 }
 
+
 ///
 ///  BEGIN SDL2 Helpers
 ///
-
 const SDL_WINDOWPOS_UNDEFINED = @bitCast(c_int, cc.SDL_WINDOWPOS_UNDEFINED_MASK);
 
 // For some reason, this isn't parsed automatically. According to SDL docs, the
@@ -603,7 +601,6 @@ fn setPixels(surf: *cc.SDL_Surface, buffer: [][4]u8) void {
 ///
 ///  BEGIN TIFFIO Helpers
 ///
-
 /// loads ISBI CTC images
 pub fn readTIFF3D(al: std.mem.Allocator, name: []const u8) !Img3D([4]u8) {
     _ = cc.tiffio.TIFFSetWarningHandler(null);
@@ -660,14 +657,20 @@ pub fn readTIFF3D(al: std.mem.Allocator, name: []const u8) !Img3D([4]u8) {
     return pic;
 }
 
+const Draw = struct {
+    buffer: [][4]u8,
+    mousedown: bool,
+    needs_update: bool,
+    // mousePixbuffer: [][2]c_int,
+    mousePixPrev: ?[2]u31,
+    update_count: u64,
+};
+
 
 ///
 ///  MAIN() program. Load and Render TIFF with OpenCL and SDL.
 ///
-
-
 pub fn main() !u8 {
-
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     // temporary stack allocator
     // var page = std.heap.page_allocator;
@@ -714,8 +717,8 @@ pub fn main() !u8 {
     const t5 = std.time.milliTimestamp();
 
     var img_cl = try img2CLImg(grey, dcqp);
-    var nx: u32 = @floatToInt(u32, @intToFloat(f32, grey.nx) * 1.5);
-    var ny: u32 = @floatToInt(u32, @intToFloat(f32, grey.ny) * 1.5);
+    var nx: u31 = @floatToInt(u31, @intToFloat(f32, grey.nx) * 1.5);
+    var ny: u31 = @floatToInt(u31, @intToFloat(f32, grey.ny) * 1.5);
     var d_output = try Img2D([4]u8).init(nx, ny);
     // var d_output = try temp.alloc([4]u8, nx * ny);
     // var colormap = try temp.alloc([4]u8, 256);
@@ -727,8 +730,8 @@ pub fn main() !u8 {
     var view = View{
         .view_matrix = .{ 1, 0, 0, 0, 1, 0, 0, 0, 1 },
         .front_scale = .{ 1.1, 1.1, 1 },
-        .back_scale  = .{ 2.3, 2.3, 1 },
-        .anisotropy  = .{ 1, 1, 4 },
+        .back_scale = .{ 2.3, 2.3, 1 },
+        .anisotropy = .{ 1, 1, 4 },
         .screen_size = .{ nx, ny },
     };
 
@@ -813,10 +816,16 @@ pub fn main() !u8 {
         return error.SDLUpdateWindowFailed;
     }
 
-    var update = false;
     var running = true;
-    var update_count: u64 = 0;
-    var mousedown = false;
+
+    var drawer = Draw{
+        .buffer = try temp.alloc([4]u8, nx * ny),
+        .needs_update = false,
+        .update_count = 0,
+        .mousedown = false,
+        // .mousePixbuffer = try temp.alloc([2]c_int, 10),
+        .mousePixPrev = null,
+    };
 
     // var boxpts:[8]Vec2 = undefined;
     // var imgnamebuffer:[100]u8 = undefined;
@@ -837,48 +846,71 @@ pub fn main() !u8 {
                         },
                         cc.SDLK_RIGHT => {
                             view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.right);
-                            update = true;
+                            drawer.needs_update = true;
                         },
                         cc.SDLK_LEFT => {
                             view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.left);
-                            update = true;
+                            drawer.needs_update = true;
                             // print("view_angle {}\n", .{view_angle});
                         },
                         cc.SDLK_UP => {
                             view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.up);
-                            update = true;
+                            drawer.needs_update = true;
                             // print("view_angle {}\n", .{view_angle});
                         },
                         cc.SDLK_DOWN => {
                             view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.down);
-                            update = true;
+                            drawer.needs_update = true;
                             // print("view_angle {}\n", .{view_angle});
                         },
                         else => {},
                     }
                 },
                 cc.SDL_MOUSEBUTTONDOWN => {
-                    mousedown = true;
+                    drawer.mousedown = true;
                 },
                 cc.SDL_MOUSEBUTTONUP => {
-                    mousedown = false;
+                    drawer.mousedown = false;
+                    drawer.mousePixPrev = null;
                 },
                 cc.SDL_MOUSEMOTION => blk: {
-                    if (mousedown==false) break :blk;
+                    if (drawer.mousedown == false) break :blk;
                     // print("mousedown : {} {}\n",.{event.motion.x,event.motion.y});
-                    setPixel(surface,event.motion.x, event.motion.y,[4]u8{255,255,255,255});
+                    // _ = cc.SDL_LockSurface(surf);
+
+                    if (drawer.mousePixPrev==null) {
+                        drawer.mousePixPrev = .{@intCast(u31,event.motion.x) , @intCast(u31,event.motion.y)};
+                        break :blk;
+                    }
+
+                    var pix = @ptrCast([*c][4]u8, surface.pixels.?);
+
+                    im.drawLine2(
+                        pix,
+                        nx,
+                        drawer.mousePixPrev.?[0],
+                        drawer.mousePixPrev.?[1],
+                        @intCast(u31,event.motion.x),
+                        @intCast(u31,event.motion.y),
+                        [4]u8{ 255, 255, 255, 255 },
+                    );
+                    drawer.mousePixPrev.?[0] = @intCast(u31,event.motion.x);
+                    drawer.mousePixPrev.?[1] = @intCast(u31,event.motion.y);
                     _ = cc.SDL_UpdateWindowSurface(window);
+
+                    // setPixel(surface,event.motion.x, event.motion.y,[4]u8{255,255,255,255});
+
                 },
                 else => {},
             }
         }
 
-        if (update == false) {
+        if (drawer.needs_update == false) {
             cc.SDL_Delay(16);
             continue;
         }
 
-        update_count += 1;
+        drawer.update_count += 1;
 
         // perform the render and update the window
         args = .{ img_cl, d_output.img, colormap, nx, ny, mima, view };
@@ -893,7 +925,7 @@ pub fn main() !u8 {
             return error.SDLUpdateWindowFailed;
         }
 
-        update = false;
+        drawer.needs_update = false;
 
         // Save max projection result
         // const filename = try std.fmt.bufPrint(&imgnamebuffer, "output/t100_rendered_{d:0>3}.tga", .{update_count});
@@ -927,7 +959,7 @@ const LSCmap = struct {
     blue: [10]?[3]f32,
 };
 
-/// 
+///
 fn piecewiseLinearInterpolation(pieces: []const [3]f32) [256]f32 {
     var res = [_]f32{0} ** 256;
     var k: usize = 0;
