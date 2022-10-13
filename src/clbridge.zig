@@ -2,8 +2,12 @@ const std = @import("std");
 const im = @import("image_base.zig");
 const print = std.debug.print;
 const assert = std.debug.assert;
+const expect = std.testing.expect;
+const eql = std.mem.eql;
+
 const Img2D = im.Img2D;
 const Img3D = im.Img3D;
+
 
 const cc = struct {
     pub const cl = @cImport({
@@ -22,9 +26,11 @@ const cc = struct {
 
 const cl = cc.cl;
 
+
 ///
 ///  BEGIN OpenCL Helpers
 ///
+
 pub fn testForCLError(val: cl.cl_int) CLERROR!void {
     const maybeErr = switch (val) {
         0 => cl.CL_SUCCESS,
@@ -165,17 +171,13 @@ pub const CLERROR = error{
     CL_MAX_SIZE_RESTRICTION_EXCEEDED,
 };
 
-// Actually failing to catch an error causes the test to FAIL and emit an error trace.
-// I don't know why this trace doesn't look like a compile error. In fact it shares
-// the same problem as a PANIC in that on macos the trace doesn't point to the correct
-// locations in the source files.
 test "Handle a custom CLERROR" {
     print("\n", .{});
     try testForCLError(0); // code zero => CL_SUCCESS
     print("{any}\n", .{@typeInfo(cl.cl_int)});
     testForCLError(-4) catch |err| switch (err) {
         CLERROR.CL_MEM_OBJECT_ALLOCATION_FAILURE => {
-            print("\nERROR: We ran out of mem, but handle it gracefully\n", .{});
+            // print("\nERROR: We ran out of mem, but handle it gracefully\n", .{});
         },
         else => unreachable,
     };
@@ -510,10 +512,10 @@ pub fn Kernel(
     };
 }
 
-test "init.DevCtxQueProg" {
+test "test DevCtxQueProg" {
     const al = std.testing.allocator;
     const files = &[_][]const u8{
-        "volumecaster3.cl",
+        "volumecaster.cl",
     };
     var dcqp = try DevCtxQueProg.init(al, files);
     defer dcqp.deinit();
@@ -566,56 +568,28 @@ pub fn img2CLImg(
         &img.img[0],
         &errcode,
     );
-
     try testForCLError(errcode);
 
     return climg;
 }
 
-pub fn boxImage() !Img3D(f32) {
-    const nx = 708;
-    const ny = 512;
-    const nz = 34;
-    var img = try Img3D(f32).init(nx, ny, nz);
-
-    for (img.img) |*v, i| {
-        const iz = (i / (nx * ny)) % nz; // should never exceed 34
-        const iy = (i / nx) % ny;
-        const ix = i % nx;
-        var sum: u8 = 0;
-        if (iz == 0 or iz == nz - 1) sum += 1;
-        if (iy == 0 or iy == ny - 1) sum += 1;
-        if (ix == 0 or ix == nx - 1) sum += 1;
-        if (sum >= 2) {
-            v.* = 1;
-            print("{} {} {} \n", .{
-                iz,
-                iy,
-                ix,
-            });
-        }
-    }
-
-    return img;
-}
-
 ///
 ///  BEGIN SDL2 Helpers
 ///
+
 const SDL_WINDOWPOS_UNDEFINED = @bitCast(c_int, cc.SDL_WINDOWPOS_UNDEFINED_MASK);
 
 // For some reason, this isn't parsed automatically. According to SDL docs, the
 // surface pointer returned is optional!
 extern fn SDL_GetWindowSurface(window: *cc.SDL_Window) ?*cc.SDL_Surface;
 
-/// deprecated
-// fn setPixel(surf: *cc.SDL_Surface, x: c_int, y: c_int, pixel: [4]u8) void {
-//     const target_pixel = @ptrToInt(surf.pixels) +
-//         @intCast(usize, y) * @intCast(usize, surf.pitch) +
-//         @intCast(usize, x) * 4;
-//     // @breakpoint();
-//     @intToPtr(*u32, target_pixel).* = @bitCast(u32, pixel);
-// }
+fn setPixel(surf: *cc.SDL_Surface, x: c_int, y: c_int, pixel: [4]u8) void {
+    const target_pixel = @ptrToInt(surf.pixels) +
+        @intCast(usize, y) * @intCast(usize, surf.pitch) +
+        @intCast(usize, x) * 4;
+    // @breakpoint();
+    @intToPtr(*u32, target_pixel).* = @bitCast(u32, pixel);
+}
 
 fn setPixels(surf: *cc.SDL_Surface, buffer: [][4]u8) void {
     _ = cc.SDL_LockSurface(surf);
@@ -629,7 +603,8 @@ fn setPixels(surf: *cc.SDL_Surface, buffer: [][4]u8) void {
 ///
 ///  BEGIN TIFFIO Helpers
 ///
-/// tested on ISBI CTC images
+
+/// loads ISBI CTC images
 pub fn readTIFF3D(al: std.mem.Allocator, name: []const u8) !Img3D([4]u8) {
     _ = cc.tiffio.TIFFSetWarningHandler(null);
 
@@ -685,10 +660,14 @@ pub fn readTIFF3D(al: std.mem.Allocator, name: []const u8) !Img3D([4]u8) {
     return pic;
 }
 
+
 ///
 ///  MAIN() program. Load and Render TIFF with OpenCL and SDL.
 ///
+
+
 pub fn main() !u8 {
+
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     // temporary stack allocator
     // var page = std.heap.page_allocator;
@@ -703,7 +682,7 @@ pub fn main() !u8 {
 
     // define allocator and .CL files
     const files = &[_][]const u8{
-        "volumecaster3.cl",
+        "volumecaster.cl",
     };
     const t2 = std.time.milliTimestamp();
 
@@ -743,13 +722,13 @@ pub fn main() !u8 {
     // const colormap = @import("cmap.zig").colormap_cool[0..];
     const colormap = cmapCool();
 
-    @breakpoint();
+    // @breakpoint();
 
     var view = View{
         .view_matrix = .{ 1, 0, 0, 0, 1, 0, 0, 0, 1 },
         .front_scale = .{ 1.1, 1.1, 1 },
-        .back_scale = .{ 2.3, 2.3, 1 },
-        .anisotropy = .{ 1, 1, 4 },
+        .back_scale  = .{ 2.3, 2.3, 1 },
+        .anisotropy  = .{ 1, 1, 4 },
         .screen_size = .{ nx, ny },
     };
 
@@ -837,6 +816,7 @@ pub fn main() !u8 {
     var update = false;
     var running = true;
     var update_count: u64 = 0;
+    var mousedown = false;
 
     // var boxpts:[8]Vec2 = undefined;
     // var imgnamebuffer:[100]u8 = undefined;
@@ -851,28 +831,43 @@ pub fn main() !u8 {
                     running = false;
                 },
                 cc.SDL_KEYDOWN => {
-                    if (event.key.keysym.sym == cc.SDLK_q) {
-                        running = false;
+                    switch (event.key.keysym.sym) {
+                        cc.SDLK_q => {
+                            running = false;
+                        },
+                        cc.SDLK_RIGHT => {
+                            view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.right);
+                            update = true;
+                        },
+                        cc.SDLK_LEFT => {
+                            view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.left);
+                            update = true;
+                            // print("view_angle {}\n", .{view_angle});
+                        },
+                        cc.SDLK_UP => {
+                            view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.up);
+                            update = true;
+                            // print("view_angle {}\n", .{view_angle});
+                        },
+                        cc.SDLK_DOWN => {
+                            view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.down);
+                            update = true;
+                            // print("view_angle {}\n", .{view_angle});
+                        },
+                        else => {},
                     }
-                    if (event.key.keysym.sym == cc.SDLK_RIGHT) {
-                        view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.right);
-                        update = true;
-                    }
-                    if (event.key.keysym.sym == cc.SDLK_LEFT) {
-                        view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.left);
-                        update = true;
-                        // print("view_angle {}\n", .{view_angle});
-                    }
-                    if (event.key.keysym.sym == cc.SDLK_UP) {
-                        view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.up);
-                        update = true;
-                        // print("view_angle {}\n", .{view_angle});
-                    }
-                    if (event.key.keysym.sym == cc.SDLK_DOWN) {
-                        view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.down);
-                        update = true;
-                        // print("view_angle {}\n", .{view_angle});
-                    }
+                },
+                cc.SDL_MOUSEBUTTONDOWN => {
+                    mousedown = true;
+                },
+                cc.SDL_MOUSEBUTTONUP => {
+                    mousedown = false;
+                },
+                cc.SDL_MOUSEMOTION => blk: {
+                    if (mousedown==false) break :blk;
+                    // print("mousedown : {} {}\n",.{event.motion.x,event.motion.y});
+                    setPixel(surface,event.motion.x, event.motion.y,[4]u8{255,255,255,255});
+                    _ = cc.SDL_UpdateWindowSurface(window);
                 },
                 else => {},
             }
@@ -908,9 +903,7 @@ pub fn main() !u8 {
     return 0;
 }
 
-/// _cool_data = {'red':   ((0., 0., 0.), (1.0, 1.0, 1.0)),
-///             'green': ((0., 1., 1.), (1.0, 0.,  0.)),
-///             'blue':  ((0., 1., 1.), (1.0, 1.,  1.))}
+/// generate "cool" colormap
 fn cmapCool() [256][4]u8 {
     var res: [256][4]u8 = undefined;
     const reds = piecewiseLinearInterpolation(&[_][3]f32{ .{ 0, 0, 0 }, .{ 1, 1, 1 } });
@@ -934,6 +927,7 @@ const LSCmap = struct {
     blue: [10]?[3]f32,
 };
 
+/// 
 fn piecewiseLinearInterpolation(pieces: []const [3]f32) [256]f32 {
     var res = [_]f32{0} ** 256;
     var k: usize = 0;
@@ -965,17 +959,6 @@ test "test piecewiseLinearInterp" {
     print("\nres = {d}\n", .{res});
 }
 
-// fn linearSegmentedColormap(cmap: LSCmap) [256][4]u5 {
-//     res = [_][4]u8{0} ** 256;
-//     var r_idx:u8 = 0;
-//     var g_idx:u8 = 0;
-//     var b_idx:u8 = 0;
-//     for (res) |*r, i| {
-//         const x = @intToFloat(f32, i) / 255;
-//         const y = lerp(x0,x,x1,y0,y1)
-//     }
-// }
-
 const V3 = @Vector(3, f32);
 const V2 = @Vector(2, f32);
 const U2 = @Vector(2, u32);
@@ -992,6 +975,34 @@ const Ray = struct { orig: V3, direc: V3 };
 fn u22V2(x: U2) V2 {
     return V2{ @intToFloat(f32, x[0]), @intToFloat(f32, x[1]) };
 }
+
+/// define small rotations: right,left,up,down
+const delta = struct {
+    const c = @cos(2 * std.math.pi / 32.0);
+    const s = @sin(2 * std.math.pi / 32.0);
+
+    // rotate z to right, x into screen.
+    pub const right: [9]f32 = .{
+        c,  0, s,
+        0,  1, 0,
+        -s, 0, c,
+    };
+    pub const left: [9]f32 = .{
+        c, 0, -s,
+        0, 1, 0,
+        s, 0, c,
+    };
+    pub const up: [9]f32 = .{
+        1, 0, 0,
+        0, c, -s,
+        0, s, c,
+    };
+    pub const down: [9]f32 = .{
+        1, 0,  0,
+        0, c,  s,
+        0, -s, c,
+    };
+};
 
 /// maps a pixel on the camera to a ray that points into the image volume.
 fn pixelToRay(view: View, pix: U2) Ray {
@@ -1040,7 +1051,7 @@ fn pointToPixel(view: View, _pt: V3) V2 {
     return .{ x, y };
 }
 
-test "test vol2PixView" {
+test "test pointToPixel" {
     // pub fn main() !void {
     print("\n", .{});
 
@@ -1140,6 +1151,34 @@ fn addBBox(img: Img2D([4]u8), view: View) void {
     }
 }
 
+/// create white bounding box around image volume
+pub fn boxImage() !Img3D(f32) {
+    const nx = 708;
+    const ny = 512;
+    const nz = 34;
+    var img = try Img3D(f32).init(nx, ny, nz);
+
+    for (img.img) |*v, i| {
+        const iz = (i / (nx * ny)) % nz; // should never exceed 34
+        const iy = (i / nx) % ny;
+        const ix = i % nx;
+        var sum: u8 = 0;
+        if (iz == 0 or iz == nz - 1) sum += 1;
+        if (iy == 0 or iy == ny - 1) sum += 1;
+        if (ix == 0 or ix == nx - 1) sum += 1;
+        if (sum >= 2) {
+            v.* = 1;
+            print("{} {} {} \n", .{
+                iz,
+                iy,
+                ix,
+            });
+        }
+    }
+
+    return img;
+}
+
 //
 // Basic Math
 //
@@ -1216,66 +1255,6 @@ fn normV3(x: V3) V3 {
     return x / V3{ s, s, s };
 }
 
-fn pix2Ray(view_matrix: [9]f32) struct { front: [9]f32, back: [9]f32 } {
-    const Nx = 500;
-    const Ny = 500;
-
-    const front = blk: {
-        const FB = 1;
-        //  row first    { 1        , 2 , 3             , 4 , 5        , 6             , 7 , 8 , 9   }
-        const a = [9]f32{ 2 / (Nx - 1), 0, -2 / (Nx - 1) - 1, 0, 2 / (Ny - 1), -2 / (Ny - 1) - 1, 0, 0, FB }; // affine translate x , y to [-1 , 1]
-        const b = [9]f32{ 1.2, 0, 0, 0, 1.2, 0, 0, 0, 1.0 }; // scale front (back) plane to determine perspective
-        const c = view_matrix; // rotate
-        const d = [9]f32{ 1.0, 0, 0, 0, 1.0, 0, 0, 0, 4.0 }; // anisotropy
-        var res = matMulNNRowFirst(3, f32, b, a);
-        res = matMulNNRowFirst(3, f32, c, res);
-        res = matMulNNRowFirst(3, f32, d, res);
-        break :blk res;
-    };
-
-    const back = blk: {
-        const FB = -1;
-        //  row first    { 1        , 2 , 3             , 4 , 5        , 6             , 7 , 8 , 9   }
-        const a = [9]f32{ 2 / (Nx - 1), 0, -2 / (Nx - 1) - 1, 0, 2 / (Ny - 1), -2 / (Ny - 1) - 1, 0, 0, FB }; // affine translate x , y to [-1 , 1]
-        const b = [9]f32{ 1.8, 0, 0, 0, 1.8, 0, 0, 0, 1.0 }; // scale front (back) plane to determine perspective
-        const c = view_matrix; // rotate
-        const d = [9]f32{ 1.0, 0, 0, 0, 1.0, 0, 0, 0, 4.0 }; // anisotropy
-        var res = matMulNNRowFirst(3, f32, b, a);
-        res = matMulNNRowFirst(3, f32, c, res);
-        res = matMulNNRowFirst(3, f32, d, res);
-        break :blk res;
-    };
-
-    return .{ .front = front, .back = back };
-}
-
-const delta = struct {
-    const c = @cos(2 * std.math.pi / 32.0);
-    const s = @sin(2 * std.math.pi / 32.0);
-
-    // rotate z to right, x into screen.
-    pub const right: [9]f32 = .{
-        c,  0, s,
-        0,  1, 0,
-        -s, 0, c,
-    };
-    pub const left: [9]f32 = .{
-        c, 0, -s,
-        0, 1, 0,
-        s, 0, c,
-    };
-    pub const up: [9]f32 = .{
-        1, 0, 0,
-        0, c, -s,
-        0, s, c,
-    };
-    pub const down: [9]f32 = .{
-        1, 0,  0,
-        0, c,  s,
-        0, -s, c,
-    };
-};
-
 fn rotmatFromAngles(invM: *[16]f32, view_angle: [2]f32) void {
     const c0 = @cos(view_angle[0]);
     const s0 = @sin(view_angle[0]);
@@ -1331,9 +1310,6 @@ pub fn matMulNNRowFirst(comptime n: u8, comptime T: type, left: [n * n]T, right:
     }
     return result;
 }
-
-const expect = std.testing.expect;
-const eql = std.mem.eql;
 
 test "test matMulRowFirst" {
     {

@@ -266,7 +266,7 @@ __kernel void max_project_float(
   // if (tnear < 0.0f) tnear = 0.0f;
   // const int reducedSteps = maxSteps; // /numParts
   // const int maxSteps = int(fabs(tfar-tnear)/dt); // assume dt = 1;
-  const int maxSteps = 15;
+  const int maxSteps = 30; //15;
   const float dt = fabs(tfar-tnear)/maxSteps; //((reducedSteps/LOOPUNROLL)*LOOPUNROLL);
   
   // delta_pos, pos, maxValPosition are re-normalized into [0,1] for access into read_imagef() with normalized coords
