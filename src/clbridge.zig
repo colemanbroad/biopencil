@@ -25,7 +25,6 @@ const cc = struct {
 
 const cl = cc.cl;
 
-
 ///
 ///  BEGIN OpenCL Helpers
 ///
@@ -571,7 +570,6 @@ pub fn img2CLImg(
     return climg;
 }
 
-
 ///
 ///  BEGIN SDL2 Helpers
 ///
@@ -657,6 +655,45 @@ pub fn readTIFF3D(al: std.mem.Allocator, name: []const u8) !Img3D([4]u8) {
     return pic;
 }
 
+// fn placeLoopIn3DImage(loop: ScreenLoop, view: View, zbuffer: Img2D(f32)) VoxelLoop {
+//     // denoise zbuffer?
+//     // find rays AND zbuffer depth for each pixel in loop (including interpolated pixels?)
+//     // project each knot
+
+// }
+
+/// IDEA: acts like an Allocator ? What happens when we want to remove or add vertices to a loop?
+const ScreenLoop = [][2]u32;
+const VolumeLoop = [][3]f32;
+
+const loops = struct {
+    const max_loop_length: u32 = 1000;
+    const avg_loop_length: u32 = 100;
+    const max_n_loops: u32 = 1000;
+    const size_base_mem = avg_loop_length * max_n_loops;
+
+    var volume_loop_mem: [size_base_mem][3]f32 = undefined; // 100 pix * 2 verts / pix * 4bytes / vert
+    var volume_loop_indices = [_]usize{0} ** 100; // up to 100 indices into loop memory
+    var n_vl_indices: usize = 0; // number of indices currently in use
+
+    var screen_loop_mem: [9000 * 2 * 4]u8 = undefined; // 100 pix * 2 verts / pix * 4bytes / vert
+    var screen_loop: std.ArrayList([2]u32) = undefined;
+
+    pub fn getVolumeLoop(n: u16) [][3]f32 {
+        return volume_loop_mem[volume_loop_indices[n]..volume_loop_indices[n + 1]];
+    }
+
+    pub fn getNewSlice(nitems: u16) [][3]f32 {
+        const idx0 = volume_loop_indices[n_vl_indices];
+        const idx1 = idx0 + nitems;
+        volume_loop_indices[n_vl_indices + 1] = idx1;
+        n_vl_indices += 1;
+        return volume_loop_mem[idx0..idx1];
+    }
+};
+
+// var loop_collection = LoopCollection{};
+
 const Draw = struct {
     buffer: [][4]u8,
     mousedown: bool,
@@ -666,12 +703,13 @@ const Draw = struct {
     update_count: u64,
 };
 
-
 ///
-///  MAIN() program. Load and Render TIFF with OpenCL and SDL.
+///  Load and Render TIFF with OpenCL and SDL.
 ///
 pub fn main() !u8 {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var fba = std.heap.FixedBufferAllocator.init(&loops.screen_loop_mem);
+    loops.screen_loop = try std.ArrayList([2]u32).initCapacity(fba.allocator(), 9000);
     // temporary stack allocator
     // var page = std.heap.page_allocator;
     var arena = std.heap.ArenaAllocator.init(gpa.allocator());
@@ -720,6 +758,7 @@ pub fn main() !u8 {
     var nx: u31 = @floatToInt(u31, @intToFloat(f32, grey.nx) * 1.5);
     var ny: u31 = @floatToInt(u31, @intToFloat(f32, grey.ny) * 1.5);
     var d_output = try Img2D([4]u8).init(nx, ny);
+    var d_zbuffer = try Img2D(f32).init(nx, ny);
     // var d_output = try temp.alloc([4]u8, nx * ny);
     // var colormap = try temp.alloc([4]u8, 256);
     // const colormap = @import("cmap.zig").colormap_cool[0..];
@@ -747,6 +786,7 @@ pub fn main() !u8 {
     var args = .{
         img_cl,
         d_output.img,
+        d_zbuffer.img,
         colormap,
         nx,
         ny,
@@ -754,7 +794,7 @@ pub fn main() !u8 {
         view,
     };
 
-    var kernel = try Kernel("max_project_float", "xrwxxxx").init(dcqp, args);
+    var kernel = try Kernel("max_project_float", "xrrwxxxx").init(dcqp, args);
     defer kernel.deinit();
 
     const t6 = std.time.milliTimestamp();
@@ -868,38 +908,40 @@ pub fn main() !u8 {
                 },
                 cc.SDL_MOUSEBUTTONDOWN => {
                     drawer.mousedown = true;
+                    // TODO: reset .loopInProgress
+                    loops.screen_loop.clearRetainingCapacity();
+                    // loopInProgress.len = 0;
                 },
-                cc.SDL_MOUSEBUTTONUP => {
+                cc.SDL_MOUSEBUTTONUP => blk: {
                     drawer.mousedown = false;
                     drawer.mousePixPrev = null;
+
+                    if (loops.screen_loop.items.len < 3) break :blk;
+
+                    try embedLoops(gpa.allocator(), loops.screen_loop.items, view, d_zbuffer);
+                    print("The number of total objects is {} \n", .{loops.n_vl_indices});
                 },
                 cc.SDL_MOUSEMOTION => blk: {
                     if (drawer.mousedown == false) break :blk;
-                    // print("mousedown : {} {}\n",.{event.motion.x,event.motion.y});
-                    // _ = cc.SDL_LockSurface(surf);
 
-                    if (drawer.mousePixPrev==null) {
-                        drawer.mousePixPrev = .{@intCast(u31,event.motion.x) , @intCast(u31,event.motion.y)};
+                    const px = @intCast(u31, event.motion.x);
+                    const py = @intCast(u31, event.motion.y);
+
+                    if (drawer.mousePixPrev == null) {
+                        drawer.mousePixPrev = .{ px, py };
                         break :blk;
                     }
 
-                    var pix = @ptrCast([*c][4]u8, surface.pixels.?);
+                    const x_old = drawer.mousePixPrev.?[0];
+                    const y_old = drawer.mousePixPrev.?[1];
+                    drawer.mousePixPrev.?[0] = px;
+                    drawer.mousePixPrev.?[1] = py;
 
-                    im.drawLine2(
-                        pix,
-                        nx,
-                        drawer.mousePixPrev.?[0],
-                        drawer.mousePixPrev.?[1],
-                        @intCast(u31,event.motion.x),
-                        @intCast(u31,event.motion.y),
-                        [4]u8{ 255, 255, 255, 255 },
-                    );
-                    drawer.mousePixPrev.?[0] = @intCast(u31,event.motion.x);
-                    drawer.mousePixPrev.?[1] = @intCast(u31,event.motion.y);
+                    var pix = @ptrCast([*c][4]u8, surface.pixels.?);
+                    im.drawLine2(pix, nx, x_old, y_old, px, py, colors.white);
                     _ = cc.SDL_UpdateWindowSurface(window);
 
-                    // setPixel(surface,event.motion.x, event.motion.y,[4]u8{255,255,255,255});
-
+                    loops.screen_loop.appendAssumeCapacity(.{ px, py });
                 },
                 else => {},
             }
@@ -913,11 +955,16 @@ pub fn main() !u8 {
         drawer.update_count += 1;
 
         // perform the render and update the window
-        args = .{ img_cl, d_output.img, colormap, nx, ny, mima, view };
+        args = .{ img_cl, d_output.img, d_zbuffer.img, colormap, nx, ny, mima, view };
         try kernel.executeKernel(dcqp, args, &.{ nx, ny });
-        // _ = cl.clFinish(dcqp.command_queue);
+        // try blurfilter(gpa.allocator(), d_zbuffer);
+        // try blurfilter(gpa.allocator(), d_zbuffer);
+        // try blurfilter(gpa.allocator(), d_zbuffer);
+        // try blurfilter(gpa.allocator(), d_zbuffer);
 
         addBBox(d_output, view);
+        drawLoops(d_output, view);
+
         setPixels(surface, d_output.img);
 
         if (cc.SDL_UpdateWindowSurface(window) != 0) {
@@ -980,7 +1027,6 @@ fn piecewiseLinearInterpolation(pieces: []const [3]f32) [256]f32 {
 }
 
 test "test piecewiseLinearInterp" {
-    // pub fn main() void {
     var pieces = [_][3]f32{
         .{ 0, 0, 1.0 },
         .{ 0.25, 0, 1 },
@@ -1036,6 +1082,84 @@ const delta = struct {
     };
 };
 
+fn drawScreenLoop(sl: ScreenLoop, d_output: Img2D([4]u8)) void {
+    // var pix = @ptrCast([*c][4]u8, surface.pixels.?);
+
+    for (sl) |pt, i| {
+        if (i == 0) continue;
+        im.drawLine(
+            [4]u8,
+            d_output,
+            @intCast(u31, sl[i - 1][0]),
+            @intCast(u31, sl[i - 1][1]),
+            @intCast(u31, pt[0]),
+            @intCast(u31, pt[1]),
+            colors.white,
+        );
+    }
+    im.drawLine(
+        [4]u8,
+        d_output,
+        @intCast(u31, sl[0][0]),
+        @intCast(u31, sl[0][1]),
+        @intCast(u31, sl[sl.len - 1][0]),
+        @intCast(u31, sl[sl.len - 1][1]),
+        colors.white,
+    );
+}
+
+/// Returns slice (ptr type) to existing memory in `loops.screen_loop`
+fn volumeLoop2ScreenLoop(view: View, vl: VolumeLoop) ScreenLoop {
+    loops.screen_loop.clearRetainingCapacity();
+    for (vl) |pt3| {
+        loops.screen_loop.appendAssumeCapacity(v22U2(pointToPixel(view, pt3)));
+    }
+    return loops.screen_loop.items;
+}
+
+// fn screenLoop2VolumeLoop(sl: ScreenLoop, view: View, zbuf: Img2D(f32)) VolumeLoop {}
+
+/// embed ScreenLoop inside volume with normalized coords [-1,1]^3
+fn embedLoops(al: std.mem.Allocator, loop: ScreenLoop, view: View, zbuf: Img2D(f32)) !void {
+    var filtered_positions = try al.alloc([3]f32, 900);
+    defer al.free(filtered_positions);
+    var vertex_count: u16 = 0;
+
+    for (loop) |v| {
+        var ztarget = zbuf.get(v[0], v[1]).*; // in [0,1] coords
+        ztarget = ztarget * 2 - 1;
+        const ray = pixelToRay(view, v);
+        const alpha = (ztarget - ray.orig[2]) / ray.direc[2];
+        const position = ray.orig + V3{ alpha, alpha, alpha } * ray.direc;
+        // for (position) |x| assert(x > -1 and x < 1);
+        if (@reduce(.Or, position < V3{ -1, -1, -1 })) continue;
+        if (@reduce(.Or, position > V3{ 1, 1, 1 })) continue;
+        filtered_positions[vertex_count] = position;
+        vertex_count += 1;
+    }
+
+    var floatPosActual = loops.getNewSlice(@intCast(u16, vertex_count));
+    for (floatPosActual) |*v, i| v.* = filtered_positions[i];
+}
+
+const colors = struct {
+    const white = [4]u8{ 255, 255, 255, 255 };
+    const red = [4]u8{ 255, 0, 0, 255 };
+};
+
+fn drawLoops(d_output: Img2D([4]u8), view: View) void {
+
+    // for each loop in loop_collection we know the internal coordinates (in [-1,1]) and
+    // can compute the coordinates in the pixel space of the surface using pointToPixel()
+    // then we can draw them connected with lines.
+    var i: u16 = 0;
+    while (i < loops.n_vl_indices) : (i += 1) {
+        const vl = loops.getVolumeLoop(i);
+        const sl = volumeLoop2ScreenLoop(view, vl);
+        drawScreenLoop(sl, d_output);
+    }
+}
+
 /// maps a pixel on the camera to a ray that points into the image volume.
 fn pixelToRay(view: View, pix: U2) Ray {
     const xy = u22V2(pix * U2{ 2, 2 }) / u22V2(view.screen_size + U2{ 1, 1 }) - V2{ 1, 1 }; // norm to [-1,1]
@@ -1084,7 +1208,6 @@ fn pointToPixel(view: View, _pt: V3) V2 {
 }
 
 test "test pointToPixel" {
-    // pub fn main() !void {
     print("\n", .{});
 
     const c = @cos(2 * 3.14159 / 6.0);
@@ -1178,7 +1301,7 @@ fn addBBox(img: Img2D([4]u8), view: View) void {
             @floatToInt(i32, x0[1]),
             @floatToInt(i32, x1[0]),
             @floatToInt(i32, x1[1]),
-            .{ 255, 255, 255, 255 },
+            colors.white,
         );
     }
 }
@@ -1375,4 +1498,165 @@ test "test matMulRowFirst" {
     // const c = matMulNNRowFirst(2,u32,a,b);
 
     // print("\n\na*b {d} \n\n, c {d} \n\n", .{matMulNNRowFirst(3,u32,a,b), c});
+}
+
+test "test TIFF vs raw speed" {
+    // pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var al = gpa.allocator();
+    const testtifname = "/Users/broaddus/Desktop/mpi-remote/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01/t100.tif";
+
+    var t1: i64 = undefined;
+    var t2: i64 = undefined;
+
+    t1 = std.time.milliTimestamp();
+    const img = try readTIFF3D(al, testtifname);
+    t2 = std.time.milliTimestamp();
+    print("\n", .{});
+    print("readTIFF3D {d} ms \n", .{t2 - t1});
+
+    t1 = std.time.milliTimestamp();
+    var grey = try Img3D(f32).init(img.nx, img.ny, img.nz);
+    grey.img = blk: {
+        var temp = try al.alloc(f32, img.img.len);
+        for (temp) |*v, i| v.* = @intToFloat(f32, img.img[i][0]);
+        break :blk temp;
+    };
+    t2 = std.time.milliTimestamp();
+    print("convert to grey {d} ms \n", .{t2 - t1});
+
+    t1 = std.time.milliTimestamp();
+    try grey.save("raw.img");
+    t2 = std.time.milliTimestamp();
+    print("save grey {d} ms \n", .{t2 - t1});
+
+    t1 = std.time.milliTimestamp();
+    const img2 = try Img3D(f32).load("raw.img");
+    t2 = std.time.milliTimestamp();
+    print("load raw {d} ms \n", .{t2 - t1});
+
+    try expect(eql(f32, grey.img, img2.img));
+}
+
+test "test toBytes()" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var allo = gpa.allocator();
+
+    const S = struct {
+        a: u4,
+        b: u4,
+        c: [2]u2,
+    };
+    const s = S{ .a = 0, .b = 15, .c = .{ 3, 2 } };
+
+    // _ = s;
+    const file = try std.fs.cwd().createFile("myfile.out", .{});
+    try file.writeAll(std.mem.asBytes(&s));
+    file.close();
+
+    const pix = try Img2D([4]u8).init(10, 11);
+    for (pix.img) |*v| v.* = [4]u8{ 1, 2, 4, 8 };
+    try std.fs.cwd().writeFile("pix.out", std.mem.asBytes(&pix));
+    const pix2 = std.mem.bytesAsValue(try std.fs.cwd().readFileAlloc(allo, "pix.out", 1600));
+    _ = pix2;
+
+    var array_of_bytes: [@sizeOf(S)]u8 = undefined;
+    _ = try std.fs.cwd().readFile("myfile.out", array_of_bytes[0..]);
+    const casted = std.mem.bytesAsValue(S, &array_of_bytes);
+    try expect(std.meta.eql(s, casted.*));
+    print("\nwe did it?\n{any}\n\n", .{casted.*});
+
+    // var byteslice:[10]u8 = undefined;
+    // const byteslice = try allo.alloc(u8,4);
+    // _ = byteslice;
+    // const newbytes = "\x08\xFA";
+
+    // TODO: Both of these casts FAIL! Segfault!
+    // const fromb = std.mem.asBytes(&s);
+    // for (fromb) |v,i| array_of_bytes[i] = v;
+    // var casted = std.mem.bytesToValue(S,std.mem.toBytes(s));
+    // _ = casted;
+    // print("\nwe did it?\n{any}\n\n",.{newbytes});
+
+    const S2 = packed struct {
+        a: u8,
+        b: u8,
+        c: u8,
+        d: u8,
+    };
+
+    const inst = S2{
+        .a = 0xBE,
+        .b = 0xEF,
+        .c = 0xDE,
+        .d = 0xA1,
+    };
+    const inst_bytes = "\xBE\xEF\xDE\xA1";
+    const inst2 = std.mem.bytesAsValue(S2, inst_bytes);
+
+    try expect(std.meta.eql(inst, inst2.*));
+}
+// IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS
+// IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS
+// IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS
+
+// XY format . TODO: ensure inline ?
+pub inline fn inbounds(img: anytype, px: anytype) bool {
+    if (0 <= px[0] and px[0] < img.nx and 0 <= px[1] and px[1] < img.ny) return true else return false;
+}
+
+// Run a simple min-kernel over the image to remove noise.
+fn minfilter(al: std.mem.Allocator, img: Img2D(f32)) !void {
+    const nx = img.nx;
+    // const ny = img.ny;
+    const s = img.img; // source
+    const t = try al.alloc(f32, s.len); // target
+    defer al.free(t);
+    const deltas = [_]@Vector(2, i32){ .{ -1, 0 }, .{ 0, 1 }, .{ 1, 0 }, .{ 0, -1 }, .{ 0, 0 } };
+
+    for (s) |_, i| {
+        // const i = @intCast(u32,_i);
+        var mn = s[i];
+        const px = @Vector(2, i32){ @intCast(i32, i % nx), @intCast(i32, i / nx) };
+        for (deltas) |dpx| {
+            const p = px + dpx;
+            const v = if (inbounds(img, p)) s[@intCast(u32, p[0]) + nx * @intCast(u32, p[1])] else 0;
+            mn = std.math.min(mn, v);
+        }
+        t[i] = mn;
+    }
+
+    // for (s) |_,i| {
+    // }
+    for (img.img) |*v, i| {
+        v.* = t[i];
+    }
+}
+
+// Run a simple min-kernel over the image to remove noise.
+fn blurfilter(al: std.mem.Allocator, img: Img2D(f32)) !void {
+    const nx = img.nx;
+    // const ny = img.ny;
+    const s = img.img; // source
+    const t = try al.alloc(f32, s.len); // target
+    defer al.free(t);
+    const deltas = [_]@Vector(2, i32){ .{ -1, 0 }, .{ 0, 1 }, .{ 1, 0 }, .{ 0, -1 }, .{ 0, 0 } };
+
+    for (s) |_, i| {
+        // const i = @intCast(u32,_i);
+        var x = @as(f32, 0); //s[i];
+        const px = @Vector(2, i32){ @intCast(i32, i % nx), @intCast(i32, i / nx) };
+        for (deltas) |dpx| {
+            const p = px + dpx;
+            const v = if (inbounds(img, p)) s[@intCast(u32, p[0]) + nx * @intCast(u32, p[1])] else 0;
+            x += v;
+        }
+        t[i] = x / 5;
+    }
+
+    // for (s) |_,i| {
+    // }
+    for (img.img) |*v, i| {
+        v.* = t[i];
+    }
 }

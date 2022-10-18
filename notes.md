@@ -36,6 +36,24 @@ simply adding a scalar value.
 - Note single pass on Cele volume to calculate min/max takes 60ms ?!?! That's so slow. But it does touch every pixel once.
 - bugfix 3D `boxImage()`
 
+# Mon Oct 17 12:40:49 EDT 2022
+
+Let's speed test load TIF vs load RAW...
+It's the same! Saving an f32 was 30ms, loading was 90ms with significant variability, but was less if we use f16 instead of f32.
+But doing the same in python with skimge.io was > 300ms !
+With python's `tifffile.imread` it was 280ms !
+The image is 12.3e6 pixels, and 5.7MB! It uses LZW compression to get down to 5.7MB when it should be 12.3MB. So the 90ms load includes decompression ?!
+So maybe we don't actually pay a huge price for TIFF format, if we avoid using python to load ?
+
+```
+readTIFF3D [96..105]ms
+convert to grey [87..92]ms
+save grey [19..22]ms
+load raw [69..75]ms
+```
+
+Drawing in 3D works! But the z-resolution is weak. Naive Blurring on CPU is too slow.
+
 # Questions
 
 - when to use `@as` vs `@intCast`.
@@ -43,7 +61,7 @@ simply adding a scalar value.
 # Features
 
 - [x] two rotation angles
-- [ ] box around border
+- [x] box around border
 - [ ] clicking with fw/bw 3D map 
 - [ ] dragging with cursor
 - [ ] REPL interface with autocomplete to adjust params. access nested, internal structs. interactive.
@@ -57,6 +75,16 @@ simply adding a scalar value.
 - [ ] OpenCL device & context creation is slow and highly variable. Between 60ms .. 450ms. Also I feel noticeable lag on my screen when working with most apps. This is a problem with my laptop's graphics hardware.
 - [ ] `r.direc` needs rescaling by `view.anisotropy`. Use dot product?
 - [ ] make depth coloring use colors of equal luminance! blue is much darker than yellow!
+
+# Drawing in 3D
+
+We want to draw smooth lines at the precision level of the _view_ not of the underlying image.
+Thus we want 3x f32 coordinates and linear interpolation between those points.
+We can save, sort, color, select, name, etc objects at the object level, and objects don't merge
+together even if our lines cross!
+
+We can use pixelToRay() to get the ray to cast into the volume, but then how far do we go?
+go until each ray hits the z from zbuffer.
 
 
 

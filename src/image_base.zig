@@ -6,7 +6,7 @@ const assert = std.debug.assert;
 
 const Allocator = std.mem.Allocator;
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-var allocator = gpa.allocator();
+var al = gpa.allocator();
 // pub var allocator = std.testing.allocator;
 
 // const root = @import("root");
@@ -27,21 +27,25 @@ pub fn Img2D(comptime T: type) type {
 
         pub fn init(nx: u32, ny: u32) !This {
             return This{
-                .img = try allocator.alloc(T, nx * ny),
+                .img = try al.alloc(T, nx * ny),
                 .nx = nx,
                 .ny = ny,
             };
         }
 
+        pub inline fn get(this: This, x: u32, y: u32) *T {
+            return &this.img[this.nx * y + x];
+        }
+
         pub fn deinit(this: This) void {
-            allocator.free(this.img);
+            al.free(this.img);
         }
     };
 }
 
 test "test imageBase. new img2d" {
     const mimg = Img2D(f32){
-        .img = try allocator.alloc(f32, 100 * 100),
+        .img = try al.alloc(f32, 100 * 100),
         .nx = 100,
         .ny = 100,
     };
@@ -63,7 +67,7 @@ pub fn Img3D(comptime T: type) type {
 
         pub fn init(nx: u32, ny: u32, nz: u32) !This {
             return This{
-                .img = try allocator.alloc(T, nx * ny * nz),
+                .img = try al.alloc(T, nx * ny * nz),
                 .nx = nx,
                 .ny = ny,
                 .nz = nz,
@@ -71,13 +75,98 @@ pub fn Img3D(comptime T: type) type {
         }
 
         pub fn deinit(this: This) void {
-            allocator.free(this.img);
+            al.free(this.img);
+        }
+
+        pub inline fn get(this: This, x: u32, y: u32, z: u32) *T {
+            return &this.img[this.nx * this.ny * z + this.nx * y + x];
+        }
+
+        pub fn save(this: This, name: []const u8) !void {
+            const file = try std.fs.cwd().createFile(name, .{});
+            defer file.close();
+
+            var writer = file.writer();
+
+            // try writer.writeAll(&[_]u8{
+            //     0, // ID length
+            //     0, // No color map
+            //     2, // Unmapped RGB
+            // });
+
+            try writer.writeIntLittle(u32, this.nx); //u16, @truncate(u16, self.width));
+            try writer.writeIntLittle(u32, this.ny); //u16, @truncate(u16, self.height));
+            try writer.writeIntLittle(u32, this.nz); //u16, @truncate(u16, self.height));
+            try writer.writeAll(std.mem.sliceAsBytes(this.img));
+        }
+
+        pub fn load(name: []const u8) !This {
+            const file = try std.fs.cwd().openFile(name, .{});
+            defer file.close();
+            var reader = file.reader();
+
+            const nx = try reader.readIntLittle(u32); //u16, @truncate(u16, self.width));
+            const ny = try reader.readIntLittle(u32); //u16, @truncate(u16, self.height));
+            const nz = try reader.readIntLittle(u32); //u16, @truncate(u16, self.height));
+            const buf = try reader.readAllAlloc(al, nx * ny * nz * @sizeOf(This.pixtype));
+            return This{
+                .nx = nx,
+                .ny = ny,
+                .nz = nz,
+                .img = std.mem.bytesAsSlice(This.pixtype, @alignCast(@sizeOf(This.pixtype), buf)),
+            };
         }
     };
 }
 
+test "test img3d save()" {
+    {
+        const img = try Img3D(f32).init(10, 11, 12);
+        for (img.img) |*v, i| v.* = @cos(@intToFloat(f32, i));
+        try img.save("cosine.img");
+        // const img2 = try Img3D(f32).load("cosine.img");
+        // try expect(eql(f32, img.img, img2.img));
+    }
+
+    {
+        const img = try Img3D([4]u8).init(10, 11, 12);
+        for (img.img) |*v, i| v.* = [4]u8{
+            @intCast(u8, i % 255),
+            @intCast(u8, (2 * i) % 255),
+            @intCast(u8, (3 * i) % 255),
+            @intCast(u8, i % 255),
+        };
+        try img.save("cosine.img");
+    }
+}
+
+test "test img3d load()" {
+    {
+        const img = try Img3D(f32).init(10, 11, 12);
+        for (img.img) |*v, i| v.* = @cos(@intToFloat(f32, i));
+        try img.save("cosine.img");
+        const img2 = try Img3D(f32).load("cosine.img");
+        try expect(eql(f32, img.img, img2.img));
+    }
+
+    {
+        const img = try Img3D([4]u8).init(10, 11, 12);
+        for (img.img) |*v, i| v.* = [4]u8{
+            @intCast(u8, i % 255),
+            @intCast(u8, (2 * i) % 255),
+            @intCast(u8, (3 * i) % 255),
+            @intCast(u8, i % 255),
+        };
+        try img.save("cosine.img");
+        const img2 = try Img3D([4]u8).load("cosine.img");
+        for (img.img) |_, i| {
+            try expect(eql(u8, &img.img[i], &img2.img[i]));
+        }
+    }
+}
+
 test "test imageBase. Img3D Generic" {
-    var img = try allocator.alloc(f32, 50 * 100 * 200);
+    var img = try al.alloc(f32, 50 * 100 * 200);
     const a1 = Img3D(f32){ .img = img, .nz = 50, .ny = 100, .nx = 200 };
     defer a1.deinit();
     const a2 = try Img3D(f32).init(50, 100, 200); // comptime
@@ -221,8 +310,8 @@ pub fn saveU8AsTGA(data: []u8, h: u16, w: u16, name: []const u8) !void {
     // make path if it doesn't exist
 
     const cwd = std.fs.cwd();
-    const resolved = try std.fs.path.resolve(allocator, &.{name});
-    defer allocator.free(resolved);
+    const resolved = try std.fs.path.resolve(al, &.{name});
+    defer al.free(resolved);
     const dirname = std.fs.path.dirname(resolved);
 
     // const basename = std.fs.path.basename(resolved);
@@ -286,7 +375,7 @@ pub fn myabs(a: anytype) @TypeOf(a) {
     if (a < 0) return -a else return a;
 }
 
-pub fn drawLine2(img: [*][4]u8, nx:u31, _x0: u31, _y0: u31, x1: u31, y1: u31, val: [4]u8) void {
+pub fn drawLine2(img: [*][4]u8, img_nx: u31, _x0: u31, _y0: u31, x1: u31, y1: u31, val: [4]u8) void {
     var x0: i32 = _x0;
     var y0: i32 = _y0;
     const dx = myabs(x1 - x0);
@@ -297,7 +386,7 @@ pub fn drawLine2(img: [*][4]u8, nx:u31, _x0: u31, _y0: u31, x1: u31, y1: u31, va
     var e2: i32 = 0;
 
     while (true) {
-        const idx = @intCast(u32, x0) + nx * @intCast(u32, y0);
+        const idx = @intCast(u32, x0) + img_nx * @intCast(u32, y0);
         img[idx] = val;
         e2 = 2 * err;
         if (e2 >= dy) {

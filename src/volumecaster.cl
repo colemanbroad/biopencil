@@ -199,6 +199,7 @@ __kernel void enumerateBuffer(
 __kernel void max_project_float(
                   read_only image3d_t volume,
                   global uchar4 *d_output,
+                  global float *d_zbuffer,
                   read_only global uchar4 *colormap,
                   uint Nx, 
                   uint Ny,
@@ -327,6 +328,7 @@ __kernel void max_project_float(
   // d_output[idx] = convert_uchar4(temp);
   uchar4 color = colormap[uchar(255*zDepth)];
   d_output[idx] = convert_uchar4(convert_float4(color) * float4(maxVal));
+  d_zbuffer[idx] = zDepth;
   // float4 temp = (float4){255,255,255,255} * float4(maxVal); // * float4(zDepth);
   // d_output[idx] = uchar4(maxVal*255);
 
