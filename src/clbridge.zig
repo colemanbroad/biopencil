@@ -695,7 +695,6 @@ const loops = struct {
 // var loop_collection = LoopCollection{};
 
 const Draw = struct {
-    buffer: [][4]u8,
     mousedown: bool,
     needs_update: bool,
     // mousePixbuffer: [][2]c_int,
@@ -707,6 +706,9 @@ const Draw = struct {
 ///  Load and Render TIFF with OpenCL and SDL.
 ///
 pub fn main() !u8 {
+    var t1: i64 = undefined;
+    var t2: i64 = undefined;
+
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     var fba = std.heap.FixedBufferAllocator.init(&loops.screen_loop_mem);
     loops.screen_loop = try std.ArrayList([2]u32).initCapacity(fba.allocator(), 9000);
@@ -716,33 +718,24 @@ pub fn main() !u8 {
     defer arena.deinit();
     const temp = arena.allocator();
 
-    // const testtifname = "/Users/broaddus/Desktop/mpi-remote/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01/t100.tif";
-
-    // var alo = std.testing.allocator;
-    const t1 = std.time.milliTimestamp();
-
-    // define allocator and .CL files
     const files = &[_][]const u8{
         "volumecaster.cl",
     };
-    const t2 = std.time.milliTimestamp();
 
     // setup OpenCL Contex Queue
+    t1 = std.time.milliTimestamp();
     var dcqp = try DevCtxQueProg.init(temp, files);
     defer dcqp.deinit();
-
-    const t3 = std.time.milliTimestamp();
-
-    const t4 = std.time.milliTimestamp();
+    t2 = std.time.milliTimestamp();
+    print("DevCtxQueProg.init [{}ms]\n", .{t2 - t1});
 
     // Load TIFF image
-    const testtifname = "/Users/broaddus/Desktop/mpi-remote/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01/t100.tif";
-    var arg_it = try std.process.argsWithAllocator(temp);
-    _ = arg_it.skip(); // skip exe name
-    const filename = arg_it.next() orelse testtifname;
-    // _ = filename;
-
+    t1 = std.time.milliTimestamp();
     const grey = blk: {
+        const testtifname = "/Users/broaddus/Desktop/mpi-remote/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01/t100.tif";
+        var arg_it = try std.process.argsWithAllocator(temp);
+        _ = arg_it.skip(); // skip exe name
+        const filename = arg_it.next() orelse testtifname;
         const img = try readTIFF3D(temp, filename);
         const _gray = try Img3D(f32).init(img.nx, img.ny, img.nz);
         for (_gray.img) |*v, i| {
@@ -750,10 +743,10 @@ pub fn main() !u8 {
         }
         break :blk _gray;
     };
-    // const grey = try boxImage();
+    t2 = std.time.milliTimestamp();
+    print("load TIFF and convert to f32 [{}ms]\n", .{t2 - t1});
 
-    const t5 = std.time.milliTimestamp();
-
+    t1 = std.time.milliTimestamp();
     var img_cl = try img2CLImg(grey, dcqp);
     var nx: u31 = @floatToInt(u31, @intToFloat(f32, grey.nx) * 1.5);
     var ny: u31 = @floatToInt(u31, @intToFloat(f32, grey.ny) * 1.5);
@@ -763,9 +756,6 @@ pub fn main() !u8 {
     // var colormap = try temp.alloc([4]u8, 256);
     // const colormap = @import("cmap.zig").colormap_cool[0..];
     const colormap = cmapCool();
-
-    // @breakpoint();
-
     var view = View{
         .view_matrix = .{ 1, 0, 0, 0, 1, 0, 0, 0, 1 },
         .front_scale = .{ 1.1, 1.1, 1 },
@@ -773,16 +763,15 @@ pub fn main() !u8 {
         .anisotropy = .{ 1, 1, 4 },
         .screen_size = .{ nx, ny },
     };
+    t2 = std.time.milliTimestamp();
+    print("initialize buffers [{}ms]\n", .{t2 - t1});
 
+    t1 = std.time.milliTimestamp();
     const mima = im.minmax(f32, grey.img);
+    t2 = std.time.milliTimestamp();
+    print("find min/max of f32 img [{}ms]\n", .{t2 - t1});
 
-    // for (colormap) |*v, i| v.* = .{
-    //     @intCast(u8, i), // Blue
-    //     @intCast(u8, 255 - i), // Green
-    //     @intCast(u8, 255 - i), // Red
-    //     255,
-    // };
-
+    t1 = std.time.milliTimestamp();
     var args = .{
         img_cl,
         d_output.img,
@@ -793,44 +782,29 @@ pub fn main() !u8 {
         mima,
         view,
     };
-
     var kernel = try Kernel("max_project_float", "xrrwxxxx").init(dcqp, args);
     defer kernel.deinit();
+    t2 = std.time.milliTimestamp();
+    print("define kernel [{}ms]\n", .{t2 - t1});
 
-    const t6 = std.time.milliTimestamp();
-
-    // perform the render
+    t1 = std.time.milliTimestamp();
     try kernel.executeKernel(dcqp, args, &.{ nx, ny });
-
-    const t7 = std.time.milliTimestamp();
-
-    print(
-        \\Timings : 
-        \\ t2-t1 = {} 
-        \\ t3-t2 = {} 
-        \\ t4-t3 = {} 
-        \\ t5-t4 = {} 
-        \\ t6-t5 = {} 
-        \\ t7-t6 = {} 
-        \\
-    , .{
-        t2 - t1,
-        t3 - t2,
-        t4 - t3,
-        t5 - t4,
-        t6 - t5,
-        t7 - t6,
-    });
+    t2 = std.time.milliTimestamp();
+    print("call kernel [{}ms]\n", .{t2 - t1});
 
     // Setup SDL stuff
+    t1 = std.time.milliTimestamp();
     if (cc.SDL_Init(cc.SDL_INIT_VIDEO) != 0) {
         cc.SDL_Log("Unable to initialize SDL: %s", cc.SDL_GetError());
         return error.SDLInitializationFailed;
     }
     defer cc.SDL_Quit();
+    t2 = std.time.milliTimestamp();
+    print("SDL_Init [{}ms]\n", .{t2 - t1});
 
+    t1 = std.time.milliTimestamp();
     const window = cc.SDL_CreateWindow(
-        "weekend raytracer",
+        "Volume Draw",
         SDL_WINDOWPOS_UNDEFINED,
         SDL_WINDOWPOS_UNDEFINED,
         @intCast(c_int, nx),
@@ -840,14 +814,19 @@ pub fn main() !u8 {
         cc.SDL_Log("Unable to create window: %s", cc.SDL_GetError());
         return error.SDLInitializationFailed;
     };
+    t2 = std.time.milliTimestamp();
+    print("CreateWindow [{}ms]\n", .{t2 - t1});
 
+    t1 = std.time.milliTimestamp();
     const surface = SDL_GetWindowSurface(window) orelse {
         cc.SDL_Log("Unable to get window surface: %s", cc.SDL_GetError());
         return error.SDLInitializationFailed;
     };
-    // @compileLog("Type of surface is ", @TypeOf(surface));
+    t2 = std.time.milliTimestamp();
+    print("SDL_GetWindowSurface [{}ms]\n", .{t2 - t1});
 
     // Update window
+    t1 = std.time.milliTimestamp();
     addBBox(d_output, view);
     setPixels(surface, d_output.img);
 
@@ -855,11 +834,12 @@ pub fn main() !u8 {
         cc.SDL_Log("Error updating window surface: %s", cc.SDL_GetError());
         return error.SDLUpdateWindowFailed;
     }
+    t2 = std.time.milliTimestamp();
+    print("update surface [{}ms]\n", .{t2 - t1});
 
     var running = true;
 
     var drawer = Draw{
-        .buffer = try temp.alloc([4]u8, nx * ny),
         .needs_update = false,
         .update_count = 0,
         .mousedown = false,
