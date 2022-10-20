@@ -1,4 +1,4 @@
-# Tue Sep 27 10:29:35 2022
+# Tue Sep 28 10:29:35 2022
 
 Get rendered image to appear in a GLFW window.
 
@@ -46,17 +46,49 @@ The image is 12.3e6 pixels, and 5.7MB! It uses LZW compression to get down to 5.
 So maybe we don't actually pay a huge price for TIFF format, if we avoid using python to load ?
 
 ```
-readTIFF3D [96..105]ms
-convert to grey [87..92]ms
-save grey [19..22]ms
-load raw [69..75]ms
+DevCtxQueProg.init           [85ms]
+struct{w: u32, h: u32, depth: u32, n_strips: u32}{ .w = 708, .h = 512, .depth = 34, .n_strips = 47 }
+load TIFF and convert to f32 [177ms]
+initialize buffers           [2ms]
+find min/max of f32 img      [70ms]
+define kernel                [0ms]
+call kernel                  [11ms]
+SDL_Init                     [163ms]
+CreateWindow                 [20ms]
+SDL_GetWindowSurface         [1081ms]
+update surface               [6ms]
 ```
 
 Drawing in 3D works! But the z-resolution is weak. Naive Blurring on CPU is too slow.
 
+# Wed Oct 19 12:21:00 EDT 2022
+
+Let's try to draw on a smoother image, like Tribolium. 
+Do we have any denoised celegans ?
+
+# Thu Oct 20 13:28:27 EDT 2022
+
+I want an interface that allows me to open all the kinds of TIFFs I will face in the wild.
+This means I should also be able to open, tiffs which are:
+
+- [x] multiple bit depth
+- [x] uint,int,float
+- [ ] multiple samples per pixel (channels)
+- [ ] 2D/3D/4D (time)
+
+What about the fact that the most common bit depth coming off of the microscope is actually 12?
+I need a single function and it can return a union over various image types.
+
+readTIFF3D 231 ms
+save img f32 33 ms
+load raw f32 109 ms
+save img f16 21 ms
+load raw f16 68 ms
+
+
 # Questions
 
-- when to use `@as` vs `@intCast`.
+- when to use `@as` vs `@intCast` ?
 
 # Features
 
@@ -66,15 +98,21 @@ Drawing in 3D works! But the z-resolution is weak. Naive Blurring on CPU is too 
 - [ ] dragging with cursor
 - [ ] REPL interface with autocomplete to adjust params. access nested, internal structs. interactive.
 - [ ] colors: smoother color pallete...
+- [ ] semantic labels for objects, object selection and manipulation, colors based on object label.
+- [ ] add text labels pointing to objects that follow them over time and during view manipulation, rotation, etc.
+- [ ] proper window size. has a max width, but otherwise is h/w proportional to x,y image size. anisotropy interpreted from image.
+- [ ] Loops and BoundingBox are always drawn on top of image... Should they be ? No, this is why we started this project in the first place.
 
 
 # Bugs
 
 - [ ] The rendering uses `maxSteps=15` which causes severe aliasing from undersampled depth dimension, but increasing causes severse slowdown.
 - [ ] Reading TIFF is slow. 95MB tiff file reads in 2s... Most of this must be decoding, because I can `dd` the file to `/dev/null/` at 4GB/s.
+      UPDATE: 84MB tiff Tribolium reads in 1.3s. This is def too slow.
 - [ ] OpenCL device & context creation is slow and highly variable. Between 60ms .. 450ms. Also I feel noticeable lag on my screen when working with most apps. This is a problem with my laptop's graphics hardware.
 - [ ] `r.direc` needs rescaling by `view.anisotropy`. Use dot product?
 - [ ] make depth coloring use colors of equal luminance! blue is much darker than yellow!
+- [ ] `/fisheye/training/ce_024/train_cp/pimgs/train1/pimg_211.tif`: "Sorry, can not handle images with IEEE floating-point samples."
 
 # Drawing in 3D
 
@@ -85,6 +123,5 @@ together even if our lines cross!
 
 We can use pixelToRay() to get the ray to cast into the volume, but then how far do we go?
 go until each ray hits the z from zbuffer.
-
 
 

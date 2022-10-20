@@ -7,13 +7,11 @@ const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 var al = gpa.allocator();
-// pub var allocator = std.testing.allocator;
-
-// const root = @import("root");
-// const test_artifacts = @import("root").thisDir() ++ "test-artifacts/";
+const eql = std.mem.eql;
 
 test {
     std.testing.refAllDecls(@This());
+    al = std.testing.allocator;
 }
 
 pub fn Img2D(comptime T: type) type {
@@ -165,6 +163,48 @@ test "test img3d load()" {
     }
 }
 
+test "test toBytes()" {
+    const S = struct { a: u4, b: u4, c: [2]u2 };
+    const s = S{ .a = 0, .b = 15, .c = .{ 3, 2 } };
+
+    const file = try std.fs.cwd().createFile("myfile.out", .{});
+    try file.writeAll(std.mem.asBytes(&s));
+    file.close();
+
+    const pix = try Img2D([4]u8).init(10, 11);
+    for (pix.img) |*v| v.* = [4]u8{ 1, 2, 4, 8 };
+    try std.fs.cwd().writeFile("pix.out", std.mem.asBytes(&pix));
+
+    const pix2 = std.mem.bytesAsSlice(u8, try std.fs.cwd().readFileAlloc(al, "pix.out", 1600)); // SEGFAULT
+    _ = pix2;
+
+    var array_of_bytes: [@sizeOf(S)]u8 = undefined;
+    _ = try std.fs.cwd().readFile("myfile.out", array_of_bytes[0..]);
+    // WARNING: passing slice to `std.mem.bytesAsValue` SEGFAULTs
+    const casted = std.mem.bytesAsValue(S, &array_of_bytes);
+    try expect(std.meta.eql(s, casted.*));
+    print("\nwe did it?\n{any}\n\n", .{casted.*});
+
+    // var byteslice:[10]u8 = undefined;
+    // const byteslice = try allo.alloc(u8,4);
+    // _ = byteslice;
+    // const newbytes = "\x08\xFA";
+
+    // TODO: Both of these casts FAIL! Segfault!
+    // const fromb = std.mem.asBytes(&s);
+    // for (fromb) |v,i| array_of_bytes[i] = v;
+    // var casted = std.mem.bytesToValue(S,std.mem.toBytes(s));
+    // _ = casted;
+    // print("\nwe did it?\n{any}\n\n",.{newbytes});
+
+    const S2 = packed struct { a: u8, b: u8, c: u8, d: u8 };
+    const inst = S2{ .a = 0xBE, .b = 0xEF, .c = 0xDE, .d = 0xA1 };
+    const inst_bytes = "\xBE\xEF\xDE\xA1";
+    const inst2 = std.mem.bytesAsValue(S2, inst_bytes);
+
+    try expect(std.meta.eql(inst, inst2.*));
+}
+
 test "test imageBase. Img3D Generic" {
     var img = try al.alloc(f32, 50 * 100 * 200);
     const a1 = Img3D(f32){ .img = img, .nz = 50, .ny = 100, .nx = 200 };
@@ -200,17 +240,10 @@ pub fn isin(x: anytype, container: anytype) bool {
     return false;
 }
 
-var shared_global: u8 = 0;
-
 test "test isin" {
-    shared_global += 1;
-    print("test isin shared_global = {}\n", .{shared_global});
     try expect(isin(3, .{ 1, 2, 3, 4, 5 }));
     try expect(isin('a', .{ 1, 'a', 3, 4, 5 }));
     try expect(!isin(3.9, .{ 1, 2, 3, 4, 5.0 }));
-    try expect(2 == 3); //catch return error.ArithmeticError;
-    // expect(3==3) catch print("\nexpect(3==3)\n",.{});
-    // expect(4==3) catch print("\nexpect(4==3)\n",.{});
 }
 
 pub fn norm01(comptime T: type, img: []T) void {
@@ -222,13 +255,7 @@ pub fn norm01(comptime T: type, img: []T) void {
     for (img) |*v| v.* = (v.* - mima[0]) / (mima[1] - mima[0]);
 }
 
-const eql = std.mem.eql;
-
 test "test norm()" {
-    shared_global += 1;
-    print("test norm() shared_global = {}\n", .{shared_global});
-
-    try expect(3 == 4);
     var pic = try Img2D(f32).init(100, 101);
     for (pic.img) |*v, i| v.* = @intToFloat(f32, i % 255);
     norm01(f32, pic.img);
@@ -253,55 +280,6 @@ pub fn normAffineNoErr(data: []f32, mn: f32, mx: f32) void {
         for (data) |*v| v.* = (v.* - mn) / (mx - mn);
     }
 }
-
-/// deprecated
-// pub fn saveF32AsTGAGreyNormed(
-//     data: []f32,
-//     h: u16,
-//     w: u16,
-//     name: []const u8,
-// ) !void {
-//     const rgba = try allocator.alloc(u8, 4 * data.len);
-//     defer allocator.free(rgba);
-//     // for (rgba) |*v, i| v.* = if (i % 4 == 3) 255 else clamp(@floatToInt(u8,data[i / 4]),0,255);
-//     const mnmx = minmax(f32, data);
-//     normAffineNoErr(data, mnmx[0], mnmx[1]);
-//     for (rgba) |*v, i| v.* = if (i % 4 == 3) 255 else @floatToInt(u8, data[i / 4] * 255); // get negative value?
-//     try saveU8AsTGA(rgba, h, w, name);
-// }
-
-/// deprecated
-// pub fn saveF32AsTGAGreyNormedCam(
-//     cam: anytype,
-//     name: []const u8,
-// ) !void {
-//     const rgba = try allocator.alloc(u8, 4 * cam.screen.len);
-//     defer allocator.free(rgba);
-//     // for (rgba) |*v, i| v.* = if (i % 4 == 3) 255 else clamp(@floatToInt(u8,cam[i / 4]),0,255);
-//     const mnmx = minmax(f32, cam.screen);
-//     normAffineNoErr(cam.screen, mnmx[0], mnmx[1]);
-//     for (rgba) |*v, i| v.* = if (i % 4 == 3) 255 else @floatToInt(u8, cam.screen[i / 4] * 255); // get negative value?
-//     try saveU8AsTGA(rgba, @intCast(u16, cam.nyPixels), @intCast(u16, cam.nxPixels), name);
-// }
-
-/// deprecated
-// pub fn saveF32Img2D(img: Img2D(f32), name: []const u8) !void {
-//     const rgba = try allocator.alloc(u8, 4 * img.img.len);
-//     defer allocator.free(rgba);
-//     // for (rgba) |*v, i| v.* = if (i % 4 == 3) 255 else clamp(@floatToInt(u8,img.img[i / 4]),0,255);
-//     const mnmx = minmax(f32, img.img);
-//     normAffineNoErr(img.img, mnmx[0], mnmx[1]);
-//     for (rgba) |*v, i| v.* = if (i % 4 == 3) 255 else @floatToInt(u8, img.img[i / 4] * 255); // get negative value?
-//     try saveU8AsTGA(rgba, @intCast(u16, img.ny), @intCast(u16, img.nx), name);
-// }
-
-/// deprecated
-// pub fn saveU8AsTGAGrey(data: []u8, h: u16, w: u16, name: []const u8) !void {
-//     const rgba = try allocator.alloc(u8, 4 * data.len);
-//     defer allocator.free(rgba);
-//     for (rgba) |*v, i| v.* = if (i % 4 == 3) 255 else data[i / 4];
-//     try saveU8AsTGA(rgba, h, w, name);
-// }
 
 pub fn saveU8AsTGA(data: []u8, h: u16, w: u16, name: []const u8) !void {
 

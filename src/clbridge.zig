@@ -98,7 +98,6 @@ pub fn testForCLError(val: cl.cl_int) CLERROR!void {
     if (maybeErr) |_| {
         return;
     } else |err| {
-        @breakpoint();
         return err;
     }
 }
@@ -274,10 +273,9 @@ pub const DevCtxQueProg = struct {
         // Load Source from .cl files and coerce into null terminated c-style pointers.
         const cwd = try std.fs.cwd().openDir("src", .{});
         var prog_source = try al.alloc([:0]u8, files.len);
-        inline for (files) |name, i| {
-            const file = try cwd.readFileAllocOptions(al, name, 20_000, null, @alignOf(u8), 0);
-            prog_source[i] = file;
-        }
+        defer al.free(prog_source);
+        inline for (files) |name, i| prog_source[i] = try cwd.readFileAllocOptions(al, name, 20_000, null, @alignOf(u8), 0);
+        defer inline for (files) |_, i| al.free(prog_source[i]);
         var program = cl.clCreateProgramWithSource(ctx, @intCast(cl.cl_uint, files.len), @ptrCast([*c][*c]const u8, prog_source), null, &errCode);
         try testForCLError(errCode);
 
@@ -596,62 +594,108 @@ fn setPixels(surf: *cc.SDL_Surface, buffer: [][4]u8) void {
     cc.SDL_UnlockSurface(surf);
 }
 
-///
+test "test tiff open float image" {
+    const al = std.testing.allocator;
+    const img = try readTIFF3D(al, "/Users/broaddus/Desktop/mpi-remote/project-broaddus/fisheye/training/ce_024/train_cp/pimgs/train1/pimg_211.tif");
+    defer img.deinit();
+}
+
 ///  BEGIN TIFFIO Helpers
-///
 /// loads ISBI CTC images
-pub fn readTIFF3D(al: std.mem.Allocator, name: []const u8) !Img3D([4]u8) {
+pub fn readTIFF3D(al: std.mem.Allocator, name: []const u8) !Img3D(f32) {
     _ = cc.tiffio.TIFFSetWarningHandler(null);
 
     const tif = cc.tiffio.TIFFOpen(&name[0], "r");
     defer cc.tiffio.TIFFClose(tif);
 
-    var w: u32 = undefined;
-    var h: u32 = undefined;
-    _ = cc.tiffio.TIFFGetField(tif, cc.tiffio.TIFFTAG_IMAGEWIDTH, &w);
-    _ = cc.tiffio.TIFFGetField(tif, cc.tiffio.TIFFTAG_IMAGELENGTH, &h);
+    const Meta = struct {
+        datatype: u32 = undefined,
+        bitspersample: u32 = undefined,
+        samplesperpixel: u32 = undefined,
+        imagewidth: u32 = undefined,
+        rowsperstrip: u32 = undefined,
+        imagelength: u32 = undefined,
+        n_strips: u32 = undefined,
+        n_directories: u32 = undefined,
+        scanline_size: u64 = undefined,
+    };
 
-    const n_strips = cc.tiffio.TIFFNumberOfStrips(tif);
+    // var meta = std.mem.zeroInit(Meta, .{});
+    var meta = Meta{};
 
-    var depth: u32 = 0;
-    while (cc.tiffio.TIFFReadDirectory(tif) == 1) {
-        depth += 1;
-    }
+    _ = cc.tiffio.TIFFGetField(tif, cc.tiffio.TIFFTAG_DATATYPE, &meta.datatype);
+    _ = cc.tiffio.TIFFGetField(tif, cc.tiffio.TIFFTAG_BITSPERSAMPLE, &meta.bitspersample);
+    _ = cc.tiffio.TIFFGetField(tif, cc.tiffio.TIFFTAG_SAMPLESPERPIXEL, &meta.samplesperpixel);
+    _ = cc.tiffio.TIFFGetField(tif, cc.tiffio.TIFFTAG_IMAGEWIDTH, &meta.imagewidth);
 
-    const data = .{ .w = w, .h = h, .depth = depth, .n_strips = n_strips };
-    print("{}\n", .{data});
+    _ = cc.tiffio.TIFFGetField(tif, cc.tiffio.TIFFTAG_ROWSPERSTRIP, &meta.rowsperstrip);
+    _ = cc.tiffio.TIFFGetField(tif, cc.tiffio.TIFFTAG_IMAGELENGTH, &meta.imagelength);
 
-    const buf = try al.alloc(u32, w * h * depth);
+    meta.scanline_size = cc.tiffio.TIFFRasterScanlineSize64(tif);
+    meta.n_strips = cc.tiffio.TIFFNumberOfStrips(tif);
+    meta.n_directories = blk: {
+        var depth_: u32 = 0;
+        while (cc.tiffio.TIFFReadDirectory(tif) == 1) {
+            depth_ += 1;
+        }
+        break :blk depth_;
+    };
+
+    print("meta = {}\n", .{meta});
+
+    // const buf = try al.alloc(u8, meta.imagewidth * meta.imagelength * meta.n_directories * @divExact(meta.bitspersample, 8));
+    const buf = try al.alloc(u8, meta.scanline_size * meta.imagelength * meta.n_directories);
+    defer al.free(buf);
 
     // TODO: This interface provides the simplest, highest level access to the data, but we could gain speed if we use TIFFReadEncodedStrip or TIFFReadEncodedTile inferfaces below.
-    var slice: u16 = 0;
-    while (slice < depth) : (slice += 1) {
-        const err = cc.tiffio.TIFFSetDirectory(tif, slice);
-        if (err == 0) print("ERROR: error reading TIFF slice {d}\n", .{slice});
-        var pos: usize = slice * w * h;
-        _ = cc.tiffio.TIFFReadRGBAImage(tif, w, h, &buf[pos], 0);
+    // var slice: u16 = 0;
+
+    var pos: usize = 0; //slice * w * h + line * line_size;
+    var i_dir: u16 = 0;
+    while (i_dir < meta.n_directories) : (i_dir += 1) {
+        const err = cc.tiffio.TIFFSetDirectory(tif, i_dir);
+        if (err == 0) print("ERROR: error reading TIFF i_dir {d}\n", .{i_dir});
+
+        // print("read: i_dir {} at row {}\n", .{ i_dir, row });
+        // print("read: i_dir {} \n", .{i_dir});
+        var row: u32 = 0;
+        while (row < meta.imagelength) : (row += 1) {
+            _ = cc.tiffio.TIFFReadScanline(tif, &buf[pos], row, 0); // assume one sample per pixel
+            pos += meta.scanline_size;
+        }
     }
 
-    // var i:u32 = 0;
-    // while (i<n_strips) : (i+=1) {
-    //     const len = @intCast(usize, cc.tiffio.TIFFReadEncodedStrip(tif, i, &buf[pos], -1) );
-    //     pos += len;
-    //     print("pos={d}\n", .{pos});
-    // }
+    // typedef enum {
+    // 	TIFF_NOTYPE = 0,      /* placeholder */
+    // 	TIFF_BYTE = 1,        /* 8-bit unsigned integer */
+    // 	TIFF_ASCII = 2,       /* 8-bit bytes w/ last byte null */
+    // 	TIFF_SHORT = 3,       /* 16-bit unsigned integer */
+    // 	TIFF_LONG = 4,        /* 32-bit unsigned integer */
+    // 	TIFF_RATIONAL = 5,    /* 64-bit unsigned fraction */
+    // 	TIFF_SBYTE = 6,       /* !8-bit signed integer */
+    // 	TIFF_UNDEFINED = 7,   /* !8-bit untyped data */
+    // 	TIFF_SSHORT = 8,      /* !16-bit signed integer */
+    // 	TIFF_SLONG = 9,       /* !32-bit signed integer */
+    // 	TIFF_SRATIONAL = 10,  /* !64-bit signed fraction */
+    // 	TIFF_FLOAT = 11,      /* !32-bit IEEE floating point */
+    // 	TIFF_DOUBLE = 12,     /* !64-bit IEEE floating point */
+    // 	TIFF_IFD = 13,        /* %32-bit unsigned integer (offset) */
+    // 	TIFF_LONG8 = 16,      /* BigTIFF 64-bit unsigned integer */
+    // 	TIFF_SLONG8 = 17,     /* BigTIFF 64-bit signed integer */
+    // 	TIFF_IFD8 = 18        /* BigTIFF 64-bit unsigned integer (offset) */
+    // } TIFFDataType;
+    const pic = try Img3D(f32).init(meta.imagewidth, meta.imagelength, meta.n_directories);
+    const n = @divExact(meta.bitspersample, 8);
+    for (pic.img) |*v, i| {
+        const bufbytes = buf[(n * i)..(n * (i + 1))];
 
-    // var tile:u32 = 0;
-    // while (tile<cc.tiffio.TIFFNumberOfTiles(tif)) : (tile+=1){
-    //     const len = cc.tiffio.TIFFReadEncodedTile(tif, tile, &buf[pos], -1);
-    //     print("pos={d}\n", .{pos});
-    //     pos += len;
-    // }
+        v.* = switch (meta.datatype) {
+            1, 2 => @intToFloat(f32, bufbytes[0]),
+            3 => @intToFloat(f32, std.mem.bytesAsSlice(u16, bufbytes)[0]),
+            else => unreachable,
+        };
+    }
 
-    const pic = Img3D([4]u8){
-        .img = std.mem.bytesAsSlice([4]u8, std.mem.sliceAsBytes(buf)),
-        .nx = w,
-        .ny = h,
-        .nz = depth,
-    };
     return pic;
 }
 
@@ -737,24 +781,31 @@ pub fn main() !u8 {
         _ = arg_it.skip(); // skip exe name
         const filename = arg_it.next() orelse testtifname;
         const img = try readTIFF3D(temp, filename);
-        const _gray = try Img3D(f32).init(img.nx, img.ny, img.nz);
-        for (_gray.img) |*v, i| {
-            v.* = @intToFloat(f32, img.img[i][0]) / 255;
-        }
-        break :blk _gray;
+        break :blk img;
     };
+
     t2 = std.time.milliTimestamp();
     print("load TIFF and convert to f32 [{}ms]\n", .{t2 - t1});
 
     t1 = std.time.milliTimestamp();
     var img_cl = try img2CLImg(grey, dcqp);
-    var nx: u31 = @floatToInt(u31, @intToFloat(f32, grey.nx) * 1.5);
-    var ny: u31 = @floatToInt(u31, @intToFloat(f32, grey.ny) * 1.5);
+
+    // this assumes x will be the bounding length, but it could be either!
+    var nx: u31 = undefined;
+    var ny: u31 = undefined;
+    {
+        const gx = @intToFloat(f32, grey.nx);
+        const gy = @intToFloat(f32, grey.ny);
+        const scale = std.math.min3(1600 / gx, 1200 / gy, 2.0);
+        nx = @floatToInt(u31, gx * scale);
+        ny = @floatToInt(u31, gy * scale);
+    }
     var d_output = try Img2D([4]u8).init(nx, ny);
     var d_zbuffer = try Img2D(f32).init(nx, ny);
     // var d_output = try temp.alloc([4]u8, nx * ny);
     // var colormap = try temp.alloc([4]u8, 256);
     // const colormap = @import("cmap.zig").colormap_cool[0..];
+
     const colormap = cmapCool();
     var view = View{
         .view_matrix = .{ 1, 0, 0, 0, 1, 0, 0, 0, 1 },
@@ -1482,6 +1533,8 @@ test "test matMulRowFirst" {
 
 test "test TIFF vs raw speed" {
     // pub fn main() !void {
+    print("\n", .{});
+
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     var al = gpa.allocator();
     const testtifname = "/Users/broaddus/Desktop/mpi-remote/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01/t100.tif";
@@ -1492,90 +1545,36 @@ test "test TIFF vs raw speed" {
     t1 = std.time.milliTimestamp();
     const img = try readTIFF3D(al, testtifname);
     t2 = std.time.milliTimestamp();
-    print("\n", .{});
     print("readTIFF3D {d} ms \n", .{t2 - t1});
 
     t1 = std.time.milliTimestamp();
-    var grey = try Img3D(f32).init(img.nx, img.ny, img.nz);
-    grey.img = blk: {
-        var temp = try al.alloc(f32, img.img.len);
-        for (temp) |*v, i| v.* = @intToFloat(f32, img.img[i][0]);
-        break :blk temp;
-    };
+    try img.save("raw.img");
     t2 = std.time.milliTimestamp();
-    print("convert to grey {d} ms \n", .{t2 - t1});
-
-    t1 = std.time.milliTimestamp();
-    try grey.save("raw.img");
-    t2 = std.time.milliTimestamp();
-    print("save grey {d} ms \n", .{t2 - t1});
+    print("save img {d} ms \n", .{t2 - t1});
 
     t1 = std.time.milliTimestamp();
     const img2 = try Img3D(f32).load("raw.img");
     t2 = std.time.milliTimestamp();
     print("load raw {d} ms \n", .{t2 - t1});
 
-    try expect(eql(f32, grey.img, img2.img));
+    try expect(eql(f32, img.img, img2.img));
+
+    // does it help to use f16 ?
+
+    const img3 = try Img3D(f16).init(img.nx, img.ny, img.nz);
+    for (img3.img) |*v, i| v.* = @floatCast(f16, img.img[i]);
+
+    t1 = std.time.milliTimestamp();
+    try img3.save("raw.img");
+    t2 = std.time.milliTimestamp();
+    print("save img f16 {d} ms \n", .{t2 - t1});
+
+    t1 = std.time.milliTimestamp();
+    _ = try Img3D(f16).load("raw.img");
+    t2 = std.time.milliTimestamp();
+    print("load raw f16 {d} ms \n", .{t2 - t1});
 }
 
-test "test toBytes()" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    var allo = gpa.allocator();
-
-    const S = struct {
-        a: u4,
-        b: u4,
-        c: [2]u2,
-    };
-    const s = S{ .a = 0, .b = 15, .c = .{ 3, 2 } };
-
-    // _ = s;
-    const file = try std.fs.cwd().createFile("myfile.out", .{});
-    try file.writeAll(std.mem.asBytes(&s));
-    file.close();
-
-    const pix = try Img2D([4]u8).init(10, 11);
-    for (pix.img) |*v| v.* = [4]u8{ 1, 2, 4, 8 };
-    try std.fs.cwd().writeFile("pix.out", std.mem.asBytes(&pix));
-    const pix2 = std.mem.bytesAsValue(try std.fs.cwd().readFileAlloc(allo, "pix.out", 1600));
-    _ = pix2;
-
-    var array_of_bytes: [@sizeOf(S)]u8 = undefined;
-    _ = try std.fs.cwd().readFile("myfile.out", array_of_bytes[0..]);
-    const casted = std.mem.bytesAsValue(S, &array_of_bytes);
-    try expect(std.meta.eql(s, casted.*));
-    print("\nwe did it?\n{any}\n\n", .{casted.*});
-
-    // var byteslice:[10]u8 = undefined;
-    // const byteslice = try allo.alloc(u8,4);
-    // _ = byteslice;
-    // const newbytes = "\x08\xFA";
-
-    // TODO: Both of these casts FAIL! Segfault!
-    // const fromb = std.mem.asBytes(&s);
-    // for (fromb) |v,i| array_of_bytes[i] = v;
-    // var casted = std.mem.bytesToValue(S,std.mem.toBytes(s));
-    // _ = casted;
-    // print("\nwe did it?\n{any}\n\n",.{newbytes});
-
-    const S2 = packed struct {
-        a: u8,
-        b: u8,
-        c: u8,
-        d: u8,
-    };
-
-    const inst = S2{
-        .a = 0xBE,
-        .b = 0xEF,
-        .c = 0xDE,
-        .d = 0xA1,
-    };
-    const inst_bytes = "\xBE\xEF\xDE\xA1";
-    const inst2 = std.mem.bytesAsValue(S2, inst_bytes);
-
-    try expect(std.meta.eql(inst, inst2.*));
-}
 // IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS
 // IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS
 // IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS
@@ -1640,3 +1639,18 @@ fn blurfilter(al: std.mem.Allocator, img: Img2D(f32)) !void {
         v.* = t[i];
     }
 }
+
+// fn getBufferSize(img_size_x: u32, img_size_y: u32) PtXY {
+//     const bounds: [2]bool = .{ img_size_x < 1600, img_size_y < 1200 };
+//     return switch (bounds) {
+//         .{ true, true } => .{ .x = img_size_x, .y = img_size_y },
+//         .{ true, false } => .{ .x = img_size_x * 1200 / img_size_y, .y = 1200 },
+//         .{ false, true } => .{ .x = 1600, .y = img_size_y * 1600 / img_size_x },
+//         .{ false, false } => blk: {
+//             const scale = std.math.min(1600 / img_size_x, 1200 / img_size_y);
+//             const x = img_size_x * scale;
+//             const y = img_size_y * scale;
+//             break :blk .{ .x = x, .y = y };
+//         },
+//     };
+// }

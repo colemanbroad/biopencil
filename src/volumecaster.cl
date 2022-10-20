@@ -8,30 +8,7 @@
 
   Adapted for Zig + OpenCL starting Wed Oct  6 2021 [coleman.broaddus@gmail.com]
   
-  
 */
-
-// deprecated 
-int intersectBox(float4 r_o, float4 r_d, float4 boxmin, float4 boxmax, float *tnear, float *tfar) {
-
-    // compute intersection of ray with all six bbox planes
-    float4 invR = (float4){1.0f,1.0f,1.0f,1.0f} / r_d;
-    float4 tbot = invR * (boxmin - r_o);
-    float4 ttop = invR * (boxmax - r_o);
-
-    // re-order intersections to find smallest and largest on each axis
-    float4 tmin = min(ttop, tbot);
-    float4 tmax = max(ttop, tbot);
-
-    // find the largest tmin and the smallest tmax
-    float largest_tmin = max(max(tmin.x, tmin.y), max(tmin.x, tmin.z));
-    float smallest_tmax = min(min(tmax.x, tmax.y), min(tmax.x, tmax.z));
-
-  *tnear = largest_tmin;
-  *tfar = smallest_tmax;
-
-  return smallest_tmax > largest_tmin;
-}
 
 int intersectBox3(float3 r_o, float3 r_d, float3 boxmin, float3 boxmax, float *tnear, float *tfar) {
 
@@ -127,14 +104,11 @@ void printray(Ray r) {
 }
 
 
+// Find the ray corresponding to a virutal pixel in the simulated image plane.
 Ray pix2Ray(uint2 pix , View view, uint idx) {
 
-  // pixel x,y coordinates in normalized world coords [-1,1]
-  // float u = ((float) x / (float) (Nx-1))*2.0f-1.0f;
-  // float v = ((float) y / (float) (Ny-1))*2.0f-1.0f;
-
-  // float2 xy = ((float2){2,2}*(float2)(pix))/((float2)(view.screen_size) + (float2){1,1}) - (float2){1,1};
-  float2 xy = (float2){2.0f*pix[0]/(float)(view.screen_size[0]-1) - 1, 2.0f*pix[1]/(float)(view.screen_size[1]-1) - 1};
+  float2 xy = (float2){2.0f*pix[0]/(float)(view.screen_size[0]-1) - 1, 
+                       2.0f*pix[1]/(float)(view.screen_size[1]-1) - 1};
 
   // if (idx==181248) printf("xy = %2.2v2hlf \n", xy);
 
@@ -185,16 +159,6 @@ __kernel void imgtest(
   }
 }
 
-
-__kernel void enumerateBuffer(
-  __global float *d_output 
-  )
-{
-  uint x = get_global_id(0);
-  uint y = get_global_id(1);
-  d_output[x + 10*y] = (float) (x*y);
-}
-
 // Nx,Ny = width & height of output (also compute grid?)
 __kernel void max_project_float(
                   read_only image3d_t volume,
@@ -220,7 +184,7 @@ __kernel void max_project_float(
   float clipLow   = 0.0;
   float clipHigh  = 1.0;
   float gamma     = 1.0;
-  float alpha_pow = 0.3;
+  float alpha_pow = 0.5;
 
   // int zdepth = get_image_depth(volume);
 
@@ -327,7 +291,10 @@ __kernel void max_project_float(
   
   // d_output[idx] = convert_uchar4(temp);
   uchar4 color = colormap[uchar(255*zDepth)];
-  d_output[idx] = convert_uchar4(convert_float4(color) * float4(maxVal));
+  // d_output[idx] = convert_uchar4(convert_float4(color) * float4(maxVal));
+  uchar4 val = uchar4(maxVal*255);
+  val.z = 0;
+  d_output[idx] = val;
   d_zbuffer[idx] = zDepth;
   // float4 temp = (float4){255,255,255,255} * float4(maxVal); // * float4(zDepth);
   // d_output[idx] = uchar4(maxVal*255);
