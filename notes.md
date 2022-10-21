@@ -85,6 +85,12 @@ load raw f32 109 ms
 save img f16 21 ms
 load raw f16 68 ms
 
+# Fri Oct 21 12:06:35 EDT 2022
+
+Modal editing should include modes for editing LABEL IMAGES / RAW FLUORESCENCE / etc !
+The way we select objects, etc should know the difference between image types.
+This is in addition to modes for tasks like tracking, segmentation, spot counting, etc.
+
 
 # Questions
 

@@ -1115,6 +1115,7 @@ const delta = struct {
 
 fn drawScreenLoop(sl: ScreenLoop, d_output: Img2D([4]u8)) void {
     // var pix = @ptrCast([*c][4]u8, surface.pixels.?);
+    if (sl.len == 0) return;
 
     for (sl) |pt, i| {
         if (i == 0) continue;
@@ -1150,24 +1151,41 @@ fn volumeLoop2ScreenLoop(view: View, vl: VolumeLoop) ScreenLoop {
 
 // fn screenLoop2VolumeLoop(sl: ScreenLoop, view: View, zbuf: Img2D(f32)) VolumeLoop {}
 
+fn zmean(filtered_positions: [][3]f32) f32 {
+    var total: f32 = 0;
+    for (filtered_positions) |v| total += v[2];
+    return total / @intToFloat(f32, filtered_positions.len);
+}
+
 /// embed ScreenLoop inside volume with normalized coords [-1,1]^3
-fn embedLoops(al: std.mem.Allocator, loop: ScreenLoop, view: View, zbuf: Img2D(f32)) !void {
+///  since our data is noisy, we can't always expect that the maxval of the intensity is from
+///  the object we intend. we could deal with this by _denoising_ the loop depth, the image depth buffer,
+///
+fn embedLoops(al: std.mem.Allocator, loop: ScreenLoop, view: View, depth_buffer: Img2D(f32)) !void {
+
+    // NOTE: we're looping over pixel knots in our Loop, but this does not include pixels drawn interpolated between knot points.
+    var depth_mean = @as(f32, 0);
+    for (loop) |v| {
+        var depth = depth_buffer.get(v[0], v[1]).*; // in [0,1] coords
+        depth_mean += depth;
+    }
+    depth_mean /= @intToFloat(f32, loop.len);
+
     var filtered_positions = try al.alloc([3]f32, 900);
     defer al.free(filtered_positions);
     var vertex_count: u16 = 0;
 
     for (loop) |v| {
-        var ztarget = zbuf.get(v[0], v[1]).*; // in [0,1] coords
-        ztarget = ztarget * 2 - 1;
         const ray = pixelToRay(view, v);
-        const alpha = (ztarget - ray.orig[2]) / ray.direc[2];
-        const position = ray.orig + V3{ alpha, alpha, alpha } * ray.direc;
-        // for (position) |x| assert(x > -1 and x < 1);
+        const position = ray.orig + @splat(3, depth_mean) * ray.direc;
         if (@reduce(.Or, position < V3{ -1, -1, -1 })) continue;
         if (@reduce(.Or, position > V3{ 1, 1, 1 })) continue;
         filtered_positions[vertex_count] = position;
         vertex_count += 1;
     }
+
+    // const the_zmean = zmean(filtered_positions) ;
+    // for (filtered_positions) |*v| v.*[2] = the_zmean;
 
     var floatPosActual = loops.getNewSlice(@intCast(u16, vertex_count));
     for (floatPosActual) |*v, i| v.* = filtered_positions[i];

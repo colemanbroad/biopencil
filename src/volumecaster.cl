@@ -295,7 +295,10 @@ __kernel void max_project_float(
   uchar4 val = uchar4(maxVal*255);
   val.z = 0;
   d_output[idx] = val;
-  d_zbuffer[idx] = zDepth;
+
+
+
+  d_zbuffer[idx] = maxValDepth * dt + tnear;
   // float4 temp = (float4){255,255,255,255} * float4(maxVal); // * float4(zDepth);
   // d_output[idx] = uchar4(maxVal*255);
 
