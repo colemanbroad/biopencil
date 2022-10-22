@@ -738,12 +738,16 @@ const loops = struct {
 
 // var loop_collection = LoopCollection{};
 
-const Draw = struct {
-    mousedown: bool,
+const Screen = struct {
+    surface: *cc.SDL_Surface,
     needs_update: bool,
-    // mousePixbuffer: [][2]c_int,
-    mousePixPrev: ?[2]u31,
     update_count: u64,
+};
+
+const Mouse = struct {
+    mousedown: bool,
+    mouse_location: ?[2]u31,
+    draw_mode: bool,
 };
 
 ///
@@ -888,14 +892,24 @@ pub fn main() !u8 {
     t2 = std.time.milliTimestamp();
     print("update surface [{}ms]\n", .{t2 - t1});
 
+    // done with startup . time to run the app
+    // done with startup . time to run the app
+    // done with startup . time to run the app
+    // done with startup . time to run the app
+
     var running = true;
 
-    var drawer = Draw{
+    var screen = Screen{
+        .surface = surface,
         .needs_update = false,
         .update_count = 0,
+    };
+
+    var mouse = Mouse{
         .mousedown = false,
         // .mousePixbuffer = try temp.alloc([2]c_int, 10),
-        .mousePixPrev = null,
+        .mouse_location = null,
+        .draw_mode = false,
     };
 
     // var boxpts:[8]Vec2 = undefined;
@@ -915,37 +929,44 @@ pub fn main() !u8 {
                         cc.SDLK_q => {
                             running = false;
                         },
+                        cc.SDLK_d => {
+                            mouse.draw_mode = !mouse.draw_mode;
+                        },
                         cc.SDLK_RIGHT => {
                             view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.right);
-                            drawer.needs_update = true;
+                            screen.needs_update = true;
                         },
                         cc.SDLK_LEFT => {
                             view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.left);
-                            drawer.needs_update = true;
+                            screen.needs_update = true;
                             // print("view_angle {}\n", .{view_angle});
                         },
                         cc.SDLK_UP => {
                             view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.up);
-                            drawer.needs_update = true;
+                            screen.needs_update = true;
                             // print("view_angle {}\n", .{view_angle});
                         },
                         cc.SDLK_DOWN => {
                             view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.down);
-                            drawer.needs_update = true;
+                            screen.needs_update = true;
                             // print("view_angle {}\n", .{view_angle});
                         },
                         else => {},
                     }
                 },
                 cc.SDL_MOUSEBUTTONDOWN => {
-                    drawer.mousedown = true;
+                    mouse.mousedown = true;
                     // TODO: reset .loopInProgress
+                    const px = @intCast(u31, event.button.x);
+                    const py = @intCast(u31, event.button.y);
+                    mouse.mouse_location = .{ px, py };
                     loops.screen_loop.clearRetainingCapacity();
-                    // loopInProgress.len = 0;
                 },
                 cc.SDL_MOUSEBUTTONUP => blk: {
-                    drawer.mousedown = false;
-                    drawer.mousePixPrev = null;
+                    mouse.mousedown = false;
+                    mouse.mouse_location = null;
+
+                    if (mouse.draw_mode == false) break :blk;
 
                     if (loops.screen_loop.items.len < 3) break :blk;
 
@@ -953,37 +974,42 @@ pub fn main() !u8 {
                     print("The number of total objects is {} \n", .{loops.n_vl_indices});
                 },
                 cc.SDL_MOUSEMOTION => blk: {
-                    if (drawer.mousedown == false) break :blk;
+                    if (mouse.mousedown == false) break :blk;
 
                     const px = @intCast(u31, event.motion.x);
                     const py = @intCast(u31, event.motion.y);
 
-                    if (drawer.mousePixPrev == null) {
-                        drawer.mousePixPrev = .{ px, py };
-                        break :blk;
+                    // should never be null, we've already asserted `mousedown`
+                    // if (mouse.mouse_location == null) {
+                    //     mouse.mouse_location = .{ px, py };
+                    //     break :blk;
+                    // }
+
+                    const x_old = mouse.mouse_location.?[0];
+                    const y_old = mouse.mouse_location.?[1];
+                    mouse.mouse_location.?[0] = px;
+                    mouse.mouse_location.?[1] = py;
+
+                    if (mouse.draw_mode) {
+                        var pix = @ptrCast([*c][4]u8, surface.pixels.?);
+                        im.drawLine2(pix, nx, x_old, y_old, px, py, colors.white);
+                        _ = cc.SDL_UpdateWindowSurface(window);
+                        loops.screen_loop.appendAssumeCapacity(.{ px, py });
+                    } else {
+                        mouseMoveCamera(px, py, x_old, y_old, &view);
+                        screen.needs_update = true;
                     }
-
-                    const x_old = drawer.mousePixPrev.?[0];
-                    const y_old = drawer.mousePixPrev.?[1];
-                    drawer.mousePixPrev.?[0] = px;
-                    drawer.mousePixPrev.?[1] = py;
-
-                    var pix = @ptrCast([*c][4]u8, surface.pixels.?);
-                    im.drawLine2(pix, nx, x_old, y_old, px, py, colors.white);
-                    _ = cc.SDL_UpdateWindowSurface(window);
-
-                    loops.screen_loop.appendAssumeCapacity(.{ px, py });
                 },
                 else => {},
             }
         }
 
-        if (drawer.needs_update == false) {
+        if (screen.needs_update == false) {
             cc.SDL_Delay(16);
             continue;
         }
 
-        drawer.update_count += 1;
+        screen.update_count += 1;
 
         // perform the render and update the window
         args = .{ img_cl, d_output.img, d_zbuffer.img, colormap, nx, ny, mima, view };
@@ -1003,7 +1029,7 @@ pub fn main() !u8 {
             return error.SDLUpdateWindowFailed;
         }
 
-        drawer.needs_update = false;
+        screen.needs_update = false;
 
         // Save max projection result
         // const filename = try std.fmt.bufPrint(&imgnamebuffer, "output/t100_rendered_{d:0>3}.tga", .{update_count});
@@ -1078,7 +1104,10 @@ const View = struct {
     back_scale: V3,
     anisotropy: V3,
     screen_size: U2,
+    theta: f32 = 0,
+    phi: f32 = 0,
 };
+
 const Ray = struct { orig: V3, direc: V3 };
 
 fn u22V2(x: U2) V2 {
@@ -1119,7 +1148,7 @@ fn drawScreenLoop(sl: ScreenLoop, d_output: Img2D([4]u8)) void {
 
     for (sl) |pt, i| {
         if (i == 0) continue;
-        im.drawLine(
+        im.drawLineInBounds(
             [4]u8,
             d_output,
             @intCast(u31, sl[i - 1][0]),
@@ -1129,15 +1158,18 @@ fn drawScreenLoop(sl: ScreenLoop, d_output: Img2D([4]u8)) void {
             colors.white,
         );
     }
-    im.drawLine(
-        [4]u8,
-        d_output,
-        @intCast(u31, sl[0][0]),
-        @intCast(u31, sl[0][1]),
-        @intCast(u31, sl[sl.len - 1][0]),
-        @intCast(u31, sl[sl.len - 1][1]),
-        colors.white,
-    );
+
+    // DONT ACTUALLY COMPLETE THE LOOP.
+
+    // im.drawLine(
+    //     [4]u8,
+    //     d_output,
+    //     @intCast(u31, sl[0][0]),
+    //     @intCast(u31, sl[0][1]),
+    //     @intCast(u31, sl[sl.len - 1][0]),
+    //     @intCast(u31, sl[sl.len - 1][1]),
+    //     colors.white,
+    // );
 }
 
 /// Returns slice (ptr type) to existing memory in `loops.screen_loop`
@@ -1316,7 +1348,7 @@ test "test pointToPixel" {
 }
 
 fn v22U2(x: V2) U2 {
-    return U2{ @floatToInt(u32, x[0]), @floatToInt(u32, x[1]) };
+    return U2{ @floatToInt(u32, std.math.clamp(x[0], 0, 1e6)), @floatToInt(u32, std.math.clamp(x[1], 0, 1e6)) };
 }
 
 fn addBBox(img: Img2D([4]u8), view: View) void {
@@ -1671,4 +1703,148 @@ fn blurfilter(al: std.mem.Allocator, img: Img2D(f32)) !void {
 //             break :blk .{ .x = x, .y = y };
 //         },
 //     };
+// }
+
+/// update camera position in (theta, phi) coordinates from mouse movement.
+/// determine transformation matrix from camera location.
+fn mouseMoveCamera(x: i32, y: i32, x_old: i32, y_old: i32, view: *View) void {
+    if (x == x_old and y == y_old) return;
+
+    const mouseDiffX = @intToFloat(f32, x - x_old);
+    const mouseDiffY = @intToFloat(f32, y - y_old);
+
+    view.theta += mouseDiffX / 200.0;
+    view.phi += mouseDiffY / 200.0;
+    view.phi = std.math.clamp(view.phi, -3.1415 / 2.0, 3.1415 / 2.0);
+
+    // const cam = V3{
+    //     @sin(view.theta) * 1.0 * @cos(view.phi),
+    //     @sin(view.phi) * 1.0,
+    //     -@cos(view.theta) * 1.0 * @cos(view.phi),
+    // };
+
+    // view.view_matrix = lookAtOrigin(cam, .ZYX);
+    view.view_matrix = viewmatrix_from_theta_phi(view.theta, view.phi);
+
+    // print("th {} phi {} \n", .{ view.theta, view.phi });
+    // print("cam {} \n", .{cam});
+    // print("view_matrix {d} \n", .{view.view_matrix});
+    // print("sizes x={}, y={}, z={}\n", .{
+    //     sliceL2Norm(view.view_matrix[0..3].*),
+    //     sliceL2Norm(view.view_matrix[3..6].*),
+    //     sliceL2Norm(view.view_matrix[6..9].*),
+    // });
+    // print("det(view_matrix) = {}\n", .{det(view.view_matrix)});
+}
+
+fn sliceL2Norm(arr: anytype) f32 {
+    var sum: f32 = 0;
+    for (arr) |v| sum += v * v;
+    return @sqrt(sum);
+}
+
+// find determinant of 3x3 matrix?
+pub fn det(mat: Mat3x3) f32 {
+    const a = V3{ mat[0], mat[1], mat[2] };
+    const b = V3{ mat[3], mat[4], mat[5] };
+    const c = V3{ mat[6], mat[7], mat[8] };
+    return dot(a, cross(b, c)); // determinant of 3x3 matrix is equal to scalar triple product
+}
+
+// const AxisOrder = enum { XYZ, ZYX };
+const Mat3x3 = [9]f32;
+
+/// direct computation of view matrix (rotation matrix) from theta,phi position on unit sphere
+// z' = -r(theta,phi)'
+// x' = dr/d_theta
+// y' = dr/d_phi
+fn viewmatrix_from_theta_phi(theta: f32, phi: f32) [9]f32 {
+    const x = normV3(V3{ @cos(theta) * @cos(phi), 0, @sin(theta) * @cos(phi) }); // x
+    const y = V3{ -@sin(theta) * @sin(phi), @cos(phi), @cos(theta) * @sin(phi) }; // y
+    const z = V3{ -@sin(theta) * @cos(phi), -@sin(phi), @cos(theta) * @cos(phi) }; // z
+    const m = matFromVecs(x, y, z);
+    return m;
+}
+
+// Construct an orthonormal (rotation) matrix which "looks" down the z2 axis (camera -> origin)
+// and orients y2 along the old z axis ()
+// aligns z->(origin - camera) and y is aligned with z_old.
+// Generate view matrix that orients cam towards origin.
+// fn lookAtOrigin(cam_xyz: V3, axisOrder: AxisOrder) Mat3x3 {
+
+//     // standardize on XYZ axis order
+//     const cam = switch (axisOrder) {
+//         .XYZ => cam_xyz,
+//         .ZYX => V3{ cam_xyz[2], cam_xyz[1], cam_xyz[0] },
+//     };
+
+//     const x1 = V3{ 1, 0, 0 };
+//     // const y1 = V3{0,1,0};
+//     const z1 = V3{ 0, 0, 1 };
+//     const z2 = -normV3(cam);
+//     const x2 = if (@reduce(.And, z1 == z2)) x1 else normV3(cross(z1, z2)); // protect against z1==z2.
+//     const y2 = normV3(cross(z2, x2));
+
+//     const rotM = matFromVecs(x2, y2, z2);
+
+//     // return in specified axis order
+//     switch (axisOrder) {
+//         .XYZ => return rotM,
+//         .ZYX => {
+//             reverse_inplace(&rotM);
+//             return rotM;
+//         },
+//         // .ZYX => return Mat3x3{
+//         //     rotM[8],
+//         //     rotM[7],
+//         //     rotM[6],
+//         //     rotM[5],
+//         //     rotM[4],
+//         //     rotM[3],
+//         //     rotM[2],
+//         //     rotM[1],
+//         //     rotM[0],
+//         // },
+//     }
+// }
+
+pub fn matFromVecs(v0: [3]f32, v1: [3]f32, v2: [3]f32) Mat3x3 {
+    return Mat3x3{ v0[0], v0[1], v0[2], v1[0], v1[1], v1[2], v2[0], v2[1], v2[2] };
+}
+
+// pass in pointer-to-array or slice
+// fn reverse_inplace(array_ptr: anytype) void {
+//     var array = array_ptr.*;
+//     var temp = array[0];
+//     const n = array.len;
+//     var i: usize = 0;
+
+//     while (i < @divFloor(n, 2)) : (i += 1) {
+//         temp = array[i];
+//         array[i] = array[n - i - 1];
+//         array[n - i - 1] = temp;
+//     }
+// }
+
+// test "test cameraRotation()" {
+
+//     // begin with XYZ coords, then swap to ZYX
+//     const x1 = Vec3{ 1, 0, 0 };
+//     const y1 = Vec3{ 0, 1, 0 };
+//     const z1 = Vec3{ 0, 0, 1 };
+
+//     const cam = Vec3{ -1, -1, -1 }; // checks
+//     const z2 = normalize(camPt);
+//     const x2 = normalize(geo.cross(z1, z2));
+//     const y2 = normalize(geo.cross(z2, x2));
+
+//     const rotM = geo.matFromVecs(x2, y2, z2);
+
+//     print("\n", .{});
+//     print("Rotated x1: {d} \n", .{geo.matVecMul(rotM, x1)});
+//     print("Rotated y1: {d} \n", .{geo.matVecMul(rotM, y1)});
+//     print("Rotated z1: {d} \n", .{geo.matVecMul(rotM, z1)});
+
+//     try expect(x2[2] == 0);
+//     try expect(abs(cross(x2, y2) - z2) < 1e-6);
 // }

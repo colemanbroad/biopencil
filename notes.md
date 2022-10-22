@@ -45,6 +45,7 @@ With python's `tifffile.imread` it was 280ms !
 The image is 12.3e6 pixels, and 5.7MB! It uses LZW compression to get down to 5.7MB when it should be 12.3MB. So the 90ms load includes decompression ?!
 So maybe we don't actually pay a huge price for TIFF format, if we avoid using python to load ?
 
+
 ```
 DevCtxQueProg.init           [85ms]
 struct{w: u32, h: u32, depth: u32, n_strips: u32}{ .w = 708, .h = 512, .depth = 34, .n_strips = 47 }
@@ -61,64 +62,48 @@ update surface               [6ms]
 
 Drawing in 3D works! But the z-resolution is weak. Naive Blurring on CPU is too slow.
 
-# Wed Oct 19 12:21:00 EDT 2022
-
-Let's try to draw on a smoother image, like Tribolium. 
-Do we have any denoised celegans ?
-
 # Thu Oct 20 13:28:27 EDT 2022
 
-I want an interface that allows me to open all the kinds of TIFFs I will face in the wild.
-This means I should also be able to open, tiffs which are:
+What about the fact that the most common bit depth coming off of the microscope is actually 12?
+I need a single function and it can return a union over various image types.
+
+---
+
+# Performance
+
+Reading TIFF is slow. 95MB tiff file reads in 2s... Most of this must be decoding, because I can `dd` the file to `/dev/null/` at 4GB/s.
+      UPDATE: 84MB tiff Tribolium reads in 1.3s. This is def too slow.
+OpenCL device & context creation is slow and highly variable. Between 60ms .. 450ms. Also I feel noticeable lag on my screen when working with most apps. This is a problem with my laptop's graphics hardware.
+
+# Loading data
+
+Make sure we can open:
 
 - [x] multiple bit depth
 - [x] uint,int,float
 - [ ] multiple samples per pixel (channels)
 - [ ] 2D/3D/4D (time)
 
-What about the fact that the most common bit depth coming off of the microscope is actually 12?
-I need a single function and it can return a union over various image types.
 
-readTIFF3D 231 ms
-save img f32 33 ms
-load raw f32 109 ms
-save img f16 21 ms
-load raw f16 68 ms
+Reading from TIFF is slower than reading from RAW using `Img3D.load()`.
 
-# Fri Oct 21 12:06:35 EDT 2022
+- readTIFF3D 231 ms
+- save img f32 33 ms
+- load raw f32 109 ms
+- save img f16 21 ms
+- load raw f16 68 ms
+
+
+It may actually be faster to load using the RGBA tiff interface than the `TIFFRasterScanlineSize64` interface!? confirm and explain this.
+
+# Modal Editing
 
 Modal editing should include modes for editing LABEL IMAGES / RAW FLUORESCENCE / etc !
 The way we select objects, etc should know the difference between image types.
 This is in addition to modes for tasks like tracking, segmentation, spot counting, etc.
+Different image semantics: nuclear marker, membrane marker, u16 object labels, pixelwise labels, 
+generic fluorescence, histology rgb?
 
-
-# Questions
-
-- when to use `@as` vs `@intCast` ?
-
-# Features
-
-- [x] two rotation angles
-- [x] box around border
-- [ ] clicking with fw/bw 3D map 
-- [ ] dragging with cursor
-- [ ] REPL interface with autocomplete to adjust params. access nested, internal structs. interactive.
-- [ ] colors: smoother color pallete...
-- [ ] semantic labels for objects, object selection and manipulation, colors based on object label.
-- [ ] add text labels pointing to objects that follow them over time and during view manipulation, rotation, etc.
-- [ ] proper window size. has a max width, but otherwise is h/w proportional to x,y image size. anisotropy interpreted from image.
-- [ ] Loops and BoundingBox are always drawn on top of image... Should they be ? No, this is why we started this project in the first place.
-
-
-# Bugs
-
-- [ ] The rendering uses `maxSteps=15` which causes severe aliasing from undersampled depth dimension, but increasing causes severse slowdown.
-- [ ] Reading TIFF is slow. 95MB tiff file reads in 2s... Most of this must be decoding, because I can `dd` the file to `/dev/null/` at 4GB/s.
-      UPDATE: 84MB tiff Tribolium reads in 1.3s. This is def too slow.
-- [ ] OpenCL device & context creation is slow and highly variable. Between 60ms .. 450ms. Also I feel noticeable lag on my screen when working with most apps. This is a problem with my laptop's graphics hardware.
-- [ ] `r.direc` needs rescaling by `view.anisotropy`. Use dot product?
-- [ ] make depth coloring use colors of equal luminance! blue is much darker than yellow!
-- [ ] `/fisheye/training/ce_024/train_cp/pimgs/train1/pimg_211.tif`: "Sorry, can not handle images with IEEE floating-point samples."
 
 # Drawing in 3D
 
@@ -130,4 +115,42 @@ together even if our lines cross!
 We can use pixelToRay() to get the ray to cast into the volume, but then how far do we go?
 go until each ray hits the z from zbuffer.
 
+
+# Zig Questions
+
+- when to use `@as` vs `@intCast` ?
+
+
+# Max projection mode
+
+easy 3D bounding box creation and extension in depth
+
+
+# Tracking Mode
+
+- [ ] allow object to occlude tracking tails
+- [ ] manual tracking annotation in max projection view uses smart depth inference
+- [ ] extend tracks by dragging mouse with right hand and tapping "space" with left to advance time point.
+      - [ ] use same workflow for moving bounding boxes through time.
+
+# Features
+
+- [x] two rotation angles
+- [x] box around border
+- [ ] clicking with fw/bw 3D map 
+- [ ] dragging with cursor
+- [ ] REPL interface with autocomplete to adjust params. access nested, internal structs. interactive.
+- [ ] colors: smoother color pallete...
+- [ ] semantic labels for objects, object selection and manipulation, colors based on object label.
+- [ ] add text labels pointing to objects that follow them over time and during view manipulation, rotation, etc.
+- [x] proper window size. has a max width, but otherwise is h/w proportional to x,y image size. anisotropy interpreted from image.
+- [ ] Loops and BoundingBox are always drawn on top of image... Should they be ? No, this is why we started this project in the first place.
+
+
+# Bugs
+
+- [ ] The rendering uses `maxSteps=30` which causes severe aliasing from undersampled depth dimension, but increasing causes severse slowdown.
+- [ ] `r.direc` needs rescaling by `view.anisotropy`. Use dot product?
+- [ ] make depth coloring use colors of equal luminance! blue is much darker than yellow!
+- [x] `/fisheye/training/ce_024/train_cp/pimgs/train1/pimg_211.tif`: "Sorry, can not handle images with IEEE floating-point samples."
 

@@ -82,6 +82,8 @@ typedef struct {
   float3 back_scale ;
   float3 anisotropy ;
   uint2 screen_size ;
+  float theta;
+  float phi;
 }  View ; 
 
 void printview(View v) {
@@ -291,12 +293,11 @@ __kernel void max_project_float(
   
   // d_output[idx] = convert_uchar4(temp);
   uchar4 color = colormap[uchar(255*zDepth)];
-  // d_output[idx] = convert_uchar4(convert_float4(color) * float4(maxVal));
-  uchar4 val = uchar4(maxVal*255);
-  val.z = 0;
+  uchar4 val;
+  val = convert_uchar4(convert_float4(color) * float4(maxVal));
+  // val = uchar4(maxVal*255);
+  // val.z = 0;
   d_output[idx] = val;
-
-
 
   d_zbuffer[idx] = maxValDepth * dt + tnear;
   // float4 temp = (float4){255,255,255,255} * float4(maxVal); // * float4(zDepth);
