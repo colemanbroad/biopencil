@@ -750,6 +750,25 @@ const Mouse = struct {
     draw_mode: bool,
 };
 
+// const Window = struct {
+//     sdl_window: *cc.SDL_Window,
+//     sdl_surface: *cc.SDL_Surface,
+//     pix: [*c][4]u8,
+
+//     pub fn init() void {}
+//     pub fn blit(img:Img2D([4]u8)) void {}
+
+// };
+
+// const App = struct {
+//     al: std.mem.Allocator,
+//     window1: Window,
+//     window2: Window,
+//     dcqp : DevCtxQueProg,
+//     grey : Img3D(f32),
+//     loops
+// };
+
 ///
 ///  Load and Render TIFF with OpenCL and SDL.
 ///
@@ -760,8 +779,8 @@ pub fn main() !u8 {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     var fba = std.heap.FixedBufferAllocator.init(&loops.screen_loop_mem);
     loops.screen_loop = try std.ArrayList([2]u32).initCapacity(fba.allocator(), 9000);
+
     // temporary stack allocator
-    // var page = std.heap.page_allocator;
     var arena = std.heap.ArenaAllocator.init(gpa.allocator());
     defer arena.deinit();
     const temp = arena.allocator();
@@ -806,9 +825,6 @@ pub fn main() !u8 {
     }
     var d_output = try Img2D([4]u8).init(nx, ny);
     var d_zbuffer = try Img2D(f32).init(nx, ny);
-    // var d_output = try temp.alloc([4]u8, nx * ny);
-    // var colormap = try temp.alloc([4]u8, 256);
-    // const colormap = @import("cmap.zig").colormap_cool[0..];
 
     const colormap = cmapCool();
     var view = View{
@@ -826,6 +842,8 @@ pub fn main() !u8 {
     t2 = std.time.milliTimestamp();
     print("find min/max of f32 img [{}ms]\n", .{t2 - t1});
 
+    const volume_dims = [3]u16{ @intCast(u16, grey.nx), @intCast(u16, grey.ny), @intCast(u16, grey.nz) };
+
     t1 = std.time.milliTimestamp();
     var args = .{
         img_cl,
@@ -836,8 +854,9 @@ pub fn main() !u8 {
         ny,
         mima,
         view,
+        volume_dims,
     };
-    var kernel = try Kernel("max_project_float", "xrrwxxxx").init(dcqp, args);
+    var kernel = try Kernel("max_project_float", "xrrwxxxxx").init(dcqp, args);
     defer kernel.deinit();
     t2 = std.time.milliTimestamp();
     print("define kernel [{}ms]\n", .{t2 - t1});
@@ -1012,7 +1031,7 @@ pub fn main() !u8 {
         screen.update_count += 1;
 
         // perform the render and update the window
-        args = .{ img_cl, d_output.img, d_zbuffer.img, colormap, nx, ny, mima, view };
+        args = .{ img_cl, d_output.img, d_zbuffer.img, colormap, nx, ny, mima, view, volume_dims };
         try kernel.executeKernel(dcqp, args, &.{ nx, ny });
         // try blurfilter(gpa.allocator(), d_zbuffer);
         // try blurfilter(gpa.allocator(), d_zbuffer);
@@ -1690,21 +1709,6 @@ fn blurfilter(al: std.mem.Allocator, img: Img2D(f32)) !void {
     }
 }
 
-// fn getBufferSize(img_size_x: u32, img_size_y: u32) PtXY {
-//     const bounds: [2]bool = .{ img_size_x < 1600, img_size_y < 1200 };
-//     return switch (bounds) {
-//         .{ true, true } => .{ .x = img_size_x, .y = img_size_y },
-//         .{ true, false } => .{ .x = img_size_x * 1200 / img_size_y, .y = 1200 },
-//         .{ false, true } => .{ .x = 1600, .y = img_size_y * 1600 / img_size_x },
-//         .{ false, false } => blk: {
-//             const scale = std.math.min(1600 / img_size_x, 1200 / img_size_y);
-//             const x = img_size_x * scale;
-//             const y = img_size_y * scale;
-//             break :blk .{ .x = x, .y = y };
-//         },
-//     };
-// }
-
 /// update camera position in (theta, phi) coordinates from mouse movement.
 /// determine transformation matrix from camera location.
 fn mouseMoveCamera(x: i32, y: i32, x_old: i32, y_old: i32, view: *View) void {
@@ -1717,24 +1721,8 @@ fn mouseMoveCamera(x: i32, y: i32, x_old: i32, y_old: i32, view: *View) void {
     view.phi += mouseDiffY / 200.0;
     view.phi = std.math.clamp(view.phi, -3.1415 / 2.0, 3.1415 / 2.0);
 
-    // const cam = V3{
-    //     @sin(view.theta) * 1.0 * @cos(view.phi),
-    //     @sin(view.phi) * 1.0,
-    //     -@cos(view.theta) * 1.0 * @cos(view.phi),
-    // };
-
     // view.view_matrix = lookAtOrigin(cam, .ZYX);
     view.view_matrix = viewmatrix_from_theta_phi(view.theta, view.phi);
-
-    // print("th {} phi {} \n", .{ view.theta, view.phi });
-    // print("cam {} \n", .{cam});
-    // print("view_matrix {d} \n", .{view.view_matrix});
-    // print("sizes x={}, y={}, z={}\n", .{
-    //     sliceL2Norm(view.view_matrix[0..3].*),
-    //     sliceL2Norm(view.view_matrix[3..6].*),
-    //     sliceL2Norm(view.view_matrix[6..9].*),
-    // });
-    // print("det(view_matrix) = {}\n", .{det(view.view_matrix)});
 }
 
 fn sliceL2Norm(arr: anytype) f32 {
@@ -1755,9 +1743,10 @@ pub fn det(mat: Mat3x3) f32 {
 const Mat3x3 = [9]f32;
 
 /// direct computation of view matrix (rotation matrix) from theta,phi position on unit sphere
-// z' = -r(theta,phi)'
-// x' = dr/d_theta
-// y' = dr/d_phi
+/// in spherical coordinates in Left Handed coordinate system with r(theta=0,phi=0) = -z !
+/// x' =  norm (dr/d_theta)
+/// y' =  dr/d_phi
+/// z' = -r(theta,phi)'
 fn viewmatrix_from_theta_phi(theta: f32, phi: f32) [9]f32 {
     const x = normV3(V3{ @cos(theta) * @cos(phi), 0, @sin(theta) * @cos(phi) }); // x
     const y = V3{ -@sin(theta) * @sin(phi), @cos(phi), @cos(theta) * @sin(phi) }; // y
@@ -1765,48 +1754,6 @@ fn viewmatrix_from_theta_phi(theta: f32, phi: f32) [9]f32 {
     const m = matFromVecs(x, y, z);
     return m;
 }
-
-// Construct an orthonormal (rotation) matrix which "looks" down the z2 axis (camera -> origin)
-// and orients y2 along the old z axis ()
-// aligns z->(origin - camera) and y is aligned with z_old.
-// Generate view matrix that orients cam towards origin.
-// fn lookAtOrigin(cam_xyz: V3, axisOrder: AxisOrder) Mat3x3 {
-
-//     // standardize on XYZ axis order
-//     const cam = switch (axisOrder) {
-//         .XYZ => cam_xyz,
-//         .ZYX => V3{ cam_xyz[2], cam_xyz[1], cam_xyz[0] },
-//     };
-
-//     const x1 = V3{ 1, 0, 0 };
-//     // const y1 = V3{0,1,0};
-//     const z1 = V3{ 0, 0, 1 };
-//     const z2 = -normV3(cam);
-//     const x2 = if (@reduce(.And, z1 == z2)) x1 else normV3(cross(z1, z2)); // protect against z1==z2.
-//     const y2 = normV3(cross(z2, x2));
-
-//     const rotM = matFromVecs(x2, y2, z2);
-
-//     // return in specified axis order
-//     switch (axisOrder) {
-//         .XYZ => return rotM,
-//         .ZYX => {
-//             reverse_inplace(&rotM);
-//             return rotM;
-//         },
-//         // .ZYX => return Mat3x3{
-//         //     rotM[8],
-//         //     rotM[7],
-//         //     rotM[6],
-//         //     rotM[5],
-//         //     rotM[4],
-//         //     rotM[3],
-//         //     rotM[2],
-//         //     rotM[1],
-//         //     rotM[0],
-//         // },
-//     }
-// }
 
 pub fn matFromVecs(v0: [3]f32, v1: [3]f32, v2: [3]f32) Mat3x3 {
     return Mat3x3{ v0[0], v0[1], v0[2], v1[0], v1[1], v1[2], v2[0], v2[1], v2[2] };
@@ -1826,25 +1773,3 @@ pub fn matFromVecs(v0: [3]f32, v1: [3]f32, v2: [3]f32) Mat3x3 {
 //     }
 // }
 
-// test "test cameraRotation()" {
-
-//     // begin with XYZ coords, then swap to ZYX
-//     const x1 = Vec3{ 1, 0, 0 };
-//     const y1 = Vec3{ 0, 1, 0 };
-//     const z1 = Vec3{ 0, 0, 1 };
-
-//     const cam = Vec3{ -1, -1, -1 }; // checks
-//     const z2 = normalize(camPt);
-//     const x2 = normalize(geo.cross(z1, z2));
-//     const y2 = normalize(geo.cross(z2, x2));
-
-//     const rotM = geo.matFromVecs(x2, y2, z2);
-
-//     print("\n", .{});
-//     print("Rotated x1: {d} \n", .{geo.matVecMul(rotM, x1)});
-//     print("Rotated y1: {d} \n", .{geo.matVecMul(rotM, y1)});
-//     print("Rotated z1: {d} \n", .{geo.matVecMul(rotM, z1)});
-
-//     try expect(x2[2] == 0);
-//     try expect(abs(cross(x2, y2) - z2) < 1e-6);
-// }

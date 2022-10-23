@@ -170,7 +170,8 @@ __kernel void max_project_float(
                   uint Nx, 
                   uint Ny,
                   float2 global_minmax,
-                  read_only View view
+                  read_only View view,
+                  ushort3 volume_dims
                   )
 {
 
@@ -186,7 +187,7 @@ __kernel void max_project_float(
   float clipLow   = 0.0;
   float clipHigh  = 1.0;
   float gamma     = 1.0;
-  float alpha_pow = 0.5;
+  float alpha_pow = 0.1;
 
   // int zdepth = get_image_depth(volume);
 
@@ -234,7 +235,9 @@ __kernel void max_project_float(
   // const int reducedSteps = maxSteps; // /numParts
   // const int maxSteps = int(fabs(tfar-tnear)/dt); // assume dt = 1;
   const int maxSteps = 30; //15;
-  const float dt = fabs(tfar-tnear)/maxSteps; //((reducedSteps/LOOPUNROLL)*LOOPUNROLL);
+  // const float dt = fabs(tfar-tnear)/maxSteps; //((reducedSteps/LOOPUNROLL)*LOOPUNROLL);
+  const float dt = 1 / 35.0;
+  // const float dt = 0.1; // dot(r.direc, view.anisotropy);
   
   // delta_pos, pos, maxValPosition are re-normalized into [0,1] for access into read_imagef() with normalized coords
   const float4 delta_pos = (float4){dt*r.direc/2, 0};

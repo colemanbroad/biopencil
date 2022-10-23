@@ -1,6 +1,6 @@
-# Tue Sep 28 10:29:35 2022
+# Tue Sep 27 10:29:35 2022
 
-Get rendered image to appear in a GLFW window.
+Get rendered image to appear in a SDL window.
 
 # Wed Sep 28 00:29:14 2022
 
@@ -67,6 +67,14 @@ Drawing in 3D works! But the z-resolution is weak. Naive Blurring on CPU is too 
 What about the fact that the most common bit depth coming off of the microscope is actually 12?
 I need a single function and it can return a union over various image types.
 
+
+# Sun Oct 23 12:37:26 EDT 2022
+
+When data is too thick we should be able to narrow the volume through which we perform projection.
+This volume should be easily customizable and draggable through the full volume.
+This also makes computing the projection easier as we make the volume smaller.
+
+
 ---
 
 # Performance
@@ -116,11 +124,6 @@ We can use pixelToRay() to get the ray to cast into the volume, but then how far
 go until each ray hits the z from zbuffer.
 
 
-# Zig Questions
-
-- when to use `@as` vs `@intCast` ?
-
-
 # Max projection mode
 
 easy 3D bounding box creation and extension in depth
@@ -145,6 +148,8 @@ easy 3D bounding box creation and extension in depth
 - [ ] add text labels pointing to objects that follow them over time and during view manipulation, rotation, etc.
 - [x] proper window size. has a max width, but otherwise is h/w proportional to x,y image size. anisotropy interpreted from image.
 - [ ] Loops and BoundingBox are always drawn on top of image... Should they be ? No, this is why we started this project in the first place.
+- [ ] Dynamically adjust the quality of depth rendering while view is updating. (lower density sampling in X,Y,and Z) Still shots get higher quality?
+
 
 
 # Bugs
@@ -153,4 +158,9 @@ easy 3D bounding box creation and extension in depth
 - [ ] `r.direc` needs rescaling by `view.anisotropy`. Use dot product?
 - [ ] make depth coloring use colors of equal luminance! blue is much darker than yellow!
 - [x] `/fisheye/training/ce_024/train_cp/pimgs/train1/pimg_211.tif`: "Sorry, can not handle images with IEEE floating-point samples."
+
+# Zig Questions
+
+- when to use `@as` vs `@intCast` ?
+
 
