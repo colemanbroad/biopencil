@@ -101,8 +101,41 @@ Reading from TIFF is slower than reading from RAW using `Img3D.load()`.
 - save img f16 21 ms
 - load raw f16 68 ms
 
-
 It may actually be faster to load using the RGBA tiff interface than the `TIFFRasterScanlineSize64` interface!? confirm and explain this.
+
+# Hierarchy
+
+App.mouse : Mouse
+App.window_main : Window
+App.window_view : Window
+App.mode : Mode
+App.keys : KeySystem
+
+Data.imgs : Img3D(f32)
+Data.anno : 
+Data.anno.loops : Loop
+Data.anno.regions : RectRegion
+
+Window.dims
+Window._surface
+Window.pixels : Img2D([4]u8)
+Window.blit(new_pixels)
+
+DevCtxQueProg
+Kernels.perspective_projection.kernel : Kernel
+Kernels.perspective_projection.view : View
+Kernels.perspective_projection.args : Tuple
+Kernels.median_filter
+
+
+Since View is used in and out of Kernels it cannot be a Kernel-specific type.
+We can also use View for drawing loops w CPU.
+
+embedLoops(View)
+perspective_projection.kernel.call(View)
+
+View must be global?
+
 
 # Modal Editing
 
@@ -127,6 +160,30 @@ go until each ray hits the z from zbuffer.
 # Max projection mode
 
 easy 3D bounding box creation and extension in depth
+
+# Mouse controls | View
+
+Idea to use spherical coordinates from [here](https://quaternions.online/).
+R/gamedev also recommends spherical coords [here](https://www.reddit.com/r/gamedev/comments/16zejj/3d_camera_orbit_drag_zoom/).
+NOTE: the spherical coords phi/theta system is like roll/pitch/yaw . 
+
+
+But I wrote `R(theta,phi)` by manually taking derivatives of the following system:
+This equates theta with "yaw" and phi with "pitch".
+
+```
+z' = r(theta,phi)
+x' = norm [ dr/d_theta ] 
+y' = dr/d_phi
+```
+
+where `r(theta,phi)` is a spherical coordinate system that aligns `r(0,0) = -z`.
+
+```
+r_x = norm(    cos(theta) * cos(phi), 0        ,   sin(theta) * cos(phi) )
+r_y =         -sin(theta) * sin(phi),  cos(phi),   cos(theta) * sin(phi) 
+r_z =         -sin(theta) * cos(phi), -sin(phi),   cos(theta) * cos(phi) 
+```
 
 
 # Tracking Mode
