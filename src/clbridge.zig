@@ -568,32 +568,6 @@ pub fn img2CLImg(
     return climg;
 }
 
-///
-///  BEGIN SDL2 Helpers
-///
-const SDL_WINDOWPOS_UNDEFINED = @bitCast(c_int, cc.SDL_WINDOWPOS_UNDEFINED_MASK);
-
-// For some reason, this isn't parsed automatically. According to SDL docs, the
-// surface pointer returned is optional!
-extern fn SDL_GetWindowSurface(window: *cc.SDL_Window) ?*cc.SDL_Surface;
-
-fn setPixel(surf: *cc.SDL_Surface, x: c_int, y: c_int, pixel: [4]u8) void {
-    const target_pixel = @ptrToInt(surf.pixels) +
-        @intCast(usize, y) * @intCast(usize, surf.pitch) +
-        @intCast(usize, x) * 4;
-    // @breakpoint();
-    @intToPtr(*u32, target_pixel).* = @bitCast(u32, pixel);
-}
-
-fn setPixels(surf: *cc.SDL_Surface, buffer: [][4]u8) void {
-    _ = cc.SDL_LockSurface(surf);
-    var pix = @ptrCast([*c][4]u8, surf.pixels.?);
-    for (buffer) |v, i| {
-        pix[i] = v;
-    }
-    cc.SDL_UnlockSurface(surf);
-}
-
 test "test tiff open float image" {
     const al = std.testing.allocator;
     const img = try readTIFF3D(al, "/Users/broaddus/Desktop/mpi-remote/project-broaddus/fisheye/training/ce_024/train_cp/pimgs/train1/pimg_211.tif");
@@ -631,7 +605,7 @@ pub fn readTIFF3D(al: std.mem.Allocator, name: []const u8) !Img3D(f32) {
     _ = cc.tiffio.TIFFGetField(tif, cc.tiffio.TIFFTAG_ROWSPERSTRIP, &meta.rowsperstrip);
     _ = cc.tiffio.TIFFGetField(tif, cc.tiffio.TIFFTAG_IMAGELENGTH, &meta.imagelength);
 
-    meta.scanline_size = cc.tiffio.TIFFRasterScanlineSize64(tif);
+    meta.scanline_size = cc.tiffio.TIFFRasterScanlineSize64(tif); // size in Bytes !
     meta.n_strips = cc.tiffio.TIFFNumberOfStrips(tif);
     meta.n_directories = blk: {
         var depth_: u32 = 0;
@@ -699,13 +673,6 @@ pub fn readTIFF3D(al: std.mem.Allocator, name: []const u8) !Img3D(f32) {
     return pic;
 }
 
-// fn placeLoopIn3DImage(loop: ScreenLoop, view: View, zbuffer: Img2D(f32)) VoxelLoop {
-//     // denoise zbuffer?
-//     // find rays AND zbuffer depth for each pixel in loop (including interpolated pixels?)
-//     // project each knot
-
-// }
-
 /// IDEA: acts like an Allocator ? What happens when we want to remove or add vertices to a loop?
 const ScreenLoop = [][2]u32;
 const VolumeLoop = [][3]f32;
@@ -736,8 +703,6 @@ const loops = struct {
     }
 };
 
-// var loop_collection = LoopCollection{};
-
 const Screen = struct {
     surface: *cc.SDL_Surface,
     needs_update: bool,
@@ -750,15 +715,82 @@ const Mouse = struct {
     draw_mode: bool,
 };
 
-// const Window = struct {
-//     sdl_window: *cc.SDL_Window,
-//     sdl_surface: *cc.SDL_Surface,
-//     pix: [*c][4]u8,
+// for timings
+var t1: i64 = 0;
+var t2: i64 = 0;
 
-//     pub fn init() void {}
-//     pub fn blit(img:Img2D([4]u8)) void {}
+const Window = struct {
+    sdl_window: *cc.SDL_Window,
+    surface: *cc.SDL_Surface,
+    pix: [*c][4]u8,
 
-// };
+    needs_update: bool,
+    update_count: u64,
+
+    const This = @This();
+    const SDL_WINDOWPOS_UNDEFINED = @bitCast(c_int, cc.SDL_WINDOWPOS_UNDEFINED_MASK);
+
+    // For some reason, this isn't parsed automatically. According to SDL docs, the
+    // surface pointer returned is optional!
+    extern fn SDL_GetWindowSurface(window: *cc.SDL_Window) ?*cc.SDL_Surface;
+
+    /// WARNING: c managed heap memory mixed with our custom allocator
+    pub fn init(nx: u32, ny: u32) !This {
+        t1 = std.time.milliTimestamp();
+        const window = cc.SDL_CreateWindow(
+            "Main Volume",
+            SDL_WINDOWPOS_UNDEFINED,
+            SDL_WINDOWPOS_UNDEFINED,
+            @intCast(c_int, nx),
+            @intCast(c_int, ny),
+            cc.SDL_WINDOW_OPENGL,
+        ) orelse {
+            cc.SDL_Log("Unable to create window: %s", cc.SDL_GetError());
+            return error.SDLInitializationFailed;
+        };
+        t2 = std.time.milliTimestamp();
+        print("CreateWindow [{}ms]\n", .{t2 - t1});
+
+        t1 = std.time.milliTimestamp();
+        const surface = SDL_GetWindowSurface(window) orelse {
+            cc.SDL_Log("Unable to get window surface: %s", cc.SDL_GetError());
+            return error.SDLInitializationFailed;
+        };
+        t2 = std.time.milliTimestamp();
+        print("SDL_GetWindowSurface [{}ms]\n", .{t2 - t1});
+
+        return .{
+            .sdl_window = window,
+            .surface = surface,
+            .pix = @ptrCast([*c][4]u8, surface.pixels.?),
+            .needs_update = false,
+            .update_count = 0,
+        };
+    }
+
+    fn update(this: This) !void {
+        const err = cc.SDL_UpdateWindowSurface(this.sdl_window);
+        if (err != 0) {
+            cc.SDL_Log("Error updating window surface: %s", cc.SDL_GetError());
+            return error.SDLUpdateWindowFailed;
+        }
+    }
+
+    fn setPixel(this: *This, x: c_int, y: c_int, pixel: [4]u8) void {
+        const target_pixel = @ptrToInt(this.surface.pixels) +
+            @intCast(usize, y) * @intCast(usize, this.surface.pitch) +
+            @intCast(usize, x) * 4;
+        @intToPtr(*u32, target_pixel).* = @bitCast(u32, pixel);
+    }
+
+    fn setPixels(this: *This, buffer: [][4]u8) void {
+        _ = cc.SDL_LockSurface(this.surface);
+        for (buffer) |v, i| {
+            this.pix[i] = v;
+        }
+        cc.SDL_UnlockSurface(this.surface);
+    }
+};
 
 // const App = struct {
 //     al: std.mem.Allocator,
@@ -766,16 +798,17 @@ const Mouse = struct {
 //     window2: Window,
 //     dcqp : DevCtxQueProg,
 //     grey : Img3D(f32),
-//     loops
+//     annotations : Anno,
+//     loops : Loops,
+
+//     const This = @This();
+
 // };
 
 ///
 ///  Load and Render TIFF with OpenCL and SDL.
 ///
 pub fn main() !u8 {
-    var t1: i64 = undefined;
-    var t2: i64 = undefined;
-
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     var fba = std.heap.FixedBufferAllocator.init(&loops.screen_loop_mem);
     loops.screen_loop = try std.ArrayList([2]u32).initCapacity(fba.allocator(), 9000);
@@ -806,13 +839,11 @@ pub fn main() !u8 {
         const img = try readTIFF3D(temp, filename);
         break :blk img;
     };
-
     t2 = std.time.milliTimestamp();
     print("load TIFF and convert to f32 [{}ms]\n", .{t2 - t1});
 
     t1 = std.time.milliTimestamp();
     var img_cl = try img2CLImg(grey, dcqp);
-
     // this assumes x will be the bounding length, but it could be either!
     var nx: u31 = undefined;
     var ny: u31 = undefined;
@@ -876,53 +907,17 @@ pub fn main() !u8 {
     t2 = std.time.milliTimestamp();
     print("SDL_Init [{}ms]\n", .{t2 - t1});
 
-    t1 = std.time.milliTimestamp();
-    const window = cc.SDL_CreateWindow(
-        "Volume Draw",
-        SDL_WINDOWPOS_UNDEFINED,
-        SDL_WINDOWPOS_UNDEFINED,
-        @intCast(c_int, nx),
-        @intCast(c_int, ny),
-        cc.SDL_WINDOW_OPENGL,
-    ) orelse {
-        cc.SDL_Log("Unable to create window: %s", cc.SDL_GetError());
-        return error.SDLInitializationFailed;
-    };
-    t2 = std.time.milliTimestamp();
-    print("CreateWindow [{}ms]\n", .{t2 - t1});
-
-    t1 = std.time.milliTimestamp();
-    const surface = SDL_GetWindowSurface(window) orelse {
-        cc.SDL_Log("Unable to get window surface: %s", cc.SDL_GetError());
-        return error.SDLInitializationFailed;
-    };
-    t2 = std.time.milliTimestamp();
-    print("SDL_GetWindowSurface [{}ms]\n", .{t2 - t1});
+    var window = try Window.init(grey.nx, grey.ny);
+    // TODO: window deinit()
 
     // Update window
-    t1 = std.time.milliTimestamp();
     addBBox(d_output, view);
-    setPixels(surface, d_output.img);
+    window.setPixels(d_output.img);
+    try window.update();
 
-    if (cc.SDL_UpdateWindowSurface(window) != 0) {
-        cc.SDL_Log("Error updating window surface: %s", cc.SDL_GetError());
-        return error.SDLUpdateWindowFailed;
-    }
-    t2 = std.time.milliTimestamp();
-    print("update surface [{}ms]\n", .{t2 - t1});
-
-    // done with startup . time to run the app
-    // done with startup . time to run the app
-    // done with startup . time to run the app
     // done with startup . time to run the app
 
     var running = true;
-
-    var screen = Screen{
-        .surface = surface,
-        .needs_update = false,
-        .update_count = 0,
-    };
 
     var mouse = Mouse{
         .mousedown = false,
@@ -953,21 +948,21 @@ pub fn main() !u8 {
                         },
                         cc.SDLK_RIGHT => {
                             view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.right);
-                            screen.needs_update = true;
+                            window.needs_update = true;
                         },
                         cc.SDLK_LEFT => {
                             view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.left);
-                            screen.needs_update = true;
+                            window.needs_update = true;
                             // print("view_angle {}\n", .{view_angle});
                         },
                         cc.SDLK_UP => {
                             view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.up);
-                            screen.needs_update = true;
+                            window.needs_update = true;
                             // print("view_angle {}\n", .{view_angle});
                         },
                         cc.SDLK_DOWN => {
                             view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.down);
-                            screen.needs_update = true;
+                            window.needs_update = true;
                             // print("view_angle {}\n", .{view_angle});
                         },
                         else => {},
@@ -1010,45 +1005,37 @@ pub fn main() !u8 {
                     mouse.mouse_location.?[1] = py;
 
                     if (mouse.draw_mode) {
-                        var pix = @ptrCast([*c][4]u8, surface.pixels.?);
-                        im.drawLine2(pix, nx, x_old, y_old, px, py, colors.white);
-                        _ = cc.SDL_UpdateWindowSurface(window);
+                        // var pix = @ptrCast([*c][4]u8, surface.pixels.?);
+                        im.drawLine2(window.pix, nx, x_old, y_old, px, py, colors.white);
+                        try window.update();
                         loops.screen_loop.appendAssumeCapacity(.{ px, py });
                     } else {
                         mouseMoveCamera(px, py, x_old, y_old, &view);
-                        screen.needs_update = true;
+                        window.needs_update = true;
                     }
                 },
                 else => {},
             }
         }
 
-        if (screen.needs_update == false) {
+        if (window.needs_update == false) {
             cc.SDL_Delay(16);
             continue;
         }
 
-        screen.update_count += 1;
+        window.update_count += 1;
 
         // perform the render and update the window
         args = .{ img_cl, d_output.img, d_zbuffer.img, colormap, nx, ny, mima, view, volume_dims };
         try kernel.executeKernel(dcqp, args, &.{ nx, ny });
         // try blurfilter(gpa.allocator(), d_zbuffer);
-        // try blurfilter(gpa.allocator(), d_zbuffer);
-        // try blurfilter(gpa.allocator(), d_zbuffer);
-        // try blurfilter(gpa.allocator(), d_zbuffer);
 
         addBBox(d_output, view);
         drawLoops(d_output, view);
 
-        setPixels(surface, d_output.img);
-
-        if (cc.SDL_UpdateWindowSurface(window) != 0) {
-            cc.SDL_Log("Error updating window surface: %s", cc.SDL_GetError());
-            return error.SDLUpdateWindowFailed;
-        }
-
-        screen.needs_update = false;
+        window.setPixels(d_output.img);
+        try window.update();
+        window.needs_update = false;
 
         // Save max projection result
         // const filename = try std.fmt.bufPrint(&imgnamebuffer, "output/t100_rendered_{d:0>3}.tga", .{update_count});
@@ -1607,9 +1594,6 @@ test "test TIFF vs raw speed" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     var al = gpa.allocator();
     const testtifname = "/Users/broaddus/Desktop/mpi-remote/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01/t100.tif";
-
-    var t1: i64 = undefined;
-    var t2: i64 = undefined;
 
     t1 = std.time.milliTimestamp();
     const img = try readTIFF3D(al, testtifname);
