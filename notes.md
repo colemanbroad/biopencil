@@ -121,11 +121,13 @@ Window._surface
 Window.pixels : Img2D([4]u8)
 Window.blit(new_pixels)
 
-DevCtxQueProg
-Kernels.perspective_projection.kernel : Kernel
-Kernels.perspective_projection.view : View
-Kernels.perspective_projection.args : Tuple
-Kernels.median_filter
+myCL is a namespace that holds:
+      Kernel : type
+      DevCtxQueProg : type
+      perspective_projection.kernel : Kernel
+      perspective_projection.view : View
+      perspective_projection.args : Tuple
+      median_filter
 
 
 Since View is used in and out of Kernels it cannot be a Kernel-specific type.
