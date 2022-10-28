@@ -83,6 +83,23 @@ Reading TIFF is slow. 95MB tiff file reads in 2s... Most of this must be decodin
       UPDATE: 84MB tiff Tribolium reads in 1.3s. This is def too slow.
 OpenCL device & context creation is slow and highly variable. Between 60ms .. 450ms. Also I feel noticeable lag on my screen when working with most apps. This is a problem with my laptop's graphics hardware.
 
+Thu Oct 27 01:33:24 EDT 2022
+UPDATE: No idea why... but suddenly after the refactor into Window.init() we can suddenly open an SDL window in 15 ms.
+
+We can profile our application with a simple sampling profiler!
+[mac profiling tips](https://gist.github.com/loderunner/36724cc9ee8db66db305)
+1. [call stack sampling](https://stackoverflow.com/questions/375913/how-do-i-profile-c-code-running-on-linux/378024#378024)
+2. [more call stack sampling](https://stackoverflow.com/questions/1777556/alternatives-to-gprof?noredirect=1&lq=1)
+3. [using instruments on mac](https://stackoverflow.com/questions/11445619/profiling-c-on-mac-os-x)
+
+
+`sample clbridge 30 -f sample.txt`
+`sample [pid | app name] [time in s [sample rate default 1 ms]] `
+
+Thu Oct 27 12:02:50 EDT 2022
+Profiling reveals that reading from the volume sampler in OpenCL is ACTUALLY a hot spot. And 
+that calling kernels in general is slow.
+
 # Loading data
 
 Make sure we can open:
