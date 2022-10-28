@@ -95,9 +95,12 @@ pub fn testForCLError(val: cl.cl_int) CLERROR!void {
         -72 => CLERROR.CL_MAX_SIZE_RESTRICTION_EXCEEDED,
         else => unreachable,
     };
+
     if (maybeErr) |_| {
+        // no error, return void
         return;
     } else |err| {
+        // yes error
         return err;
     }
 }
@@ -343,7 +346,7 @@ pub fn Kernel(
             try testForCLError(errCode);
 
             // TODO: Do we need to create buffers for all arguments or only for arrays?
-            // Buffers are cheap! Easy to make a simple array.
+            // Buffers are just pointers?! Easy to make a simple array.
             var buffers: [argtype.len]cl.cl_mem = undefined;
 
             // Loop over the arguments we want to pass to the kernel. Set read/write flags
@@ -486,7 +489,8 @@ pub fn Kernel(
                 if (argT == 'r') {
                     const arg = args[i];
                     const T = @TypeOf(arg);
-                    const size = switch (@typeInfo(T)) {
+                    const TI = @typeInfo(T);
+                    const size = switch (TI) {
                         .Pointer => @sizeOf(std.meta.Elem(T)) * arg.len, // assume slice or array
                         else => @sizeOf(T),
                     };
@@ -677,31 +681,141 @@ pub fn readTIFF3D(al: std.mem.Allocator, name: []const u8) !Img3D(f32) {
 const ScreenLoop = [][2]u32;
 const VolumeLoop = [][3]f32;
 
+fn drawScreenLoop(sl: ScreenLoop, d_output: Img2D([4]u8)) void {
+    // var pix = @ptrCast([*c][4]u8, surface.pixels.?);
+    if (sl.len == 0) return;
+
+    for (sl) |pt, i| {
+        if (i == 0) continue;
+        im.drawLineInBounds(
+            [4]u8,
+            d_output,
+            @intCast(u31, sl[i - 1][0]),
+            @intCast(u31, sl[i - 1][1]),
+            @intCast(u31, pt[0]),
+            @intCast(u31, pt[1]),
+            colors.white,
+        );
+    }
+
+    // DONT ACTUALLY COMPLETE THE LOOP.
+
+    // im.drawLine(
+    //     [4]u8,
+    //     d_output,
+    //     @intCast(u31, sl[0][0]),
+    //     @intCast(u31, sl[0][1]),
+    //     @intCast(u31, sl[sl.len - 1][0]),
+    //     @intCast(u31, sl[sl.len - 1][1]),
+    //     colors.white,
+    // );
+}
+
+/// Returns slice (ptr type) to existing memory in `loops.screen_loop`
+fn volumeLoop2ScreenLoop(view: View, vl: VolumeLoop) ScreenLoop {
+    // loops.screen_loop.clearRetainingCapacity();
+    for (vl) |pt3, i| {
+        loops.temp_screen_loop[i] = v22U2(pointToPixel(view, pt3));
+        // loops.screen_loop.appendAssumeCapacity(v22U2(pointToPixel(view, pt3)));
+    }
+    const n = vl.len;
+    loops.temp_screen_loop_len = n;
+    return loops.temp_screen_loop[0..n];
+}
+
+// fn screenLoop2VolumeLoop(sl: ScreenLoop, view: View, zbuf: Img2D(f32)) VolumeLoop {}
+
+// fn zmean(filtered_positions: [][3]f32) f32 {
+//     var total: f32 = 0;
+//     for (filtered_positions) |v| total += v[2];
+//     return total / @intToFloat(f32, filtered_positions.len);
+// }
+
+/// embed ScreenLoop inside volume with normalized coords [-1,1]^3
+///  since our data is noisy, we can't always expect that the maxval of the intensity is from
+///  the object we intend. we could deal with this by _denoising_ the loop depth, the image depth buffer,
+///
+fn embedLoops(al: std.mem.Allocator, loop: ScreenLoop, view: View, depth_buffer: Img2D(f32)) !void {
+
+    // NOTE: we're looping over pixel knots in our Loop, but this does not include pixels drawn interpolated between knot points.
+    var depth_mean = @as(f32, 0);
+    for (loop) |v| {
+        var depth = depth_buffer.get(v[0], v[1]).*; // in [0,1] coords
+        depth_mean += depth;
+    }
+    depth_mean /= @intToFloat(f32, loop.len);
+
+    var filtered_positions = try al.alloc([3]f32, 900);
+    defer al.free(filtered_positions);
+    var vertex_count: u16 = 0;
+
+    for (loop) |v| {
+        const ray = pixelToRay(view, v);
+        const position = ray.orig + @splat(3, depth_mean) * ray.direc;
+        if (@reduce(.Or, position < V3{ -1, -1, -1 })) continue;
+        if (@reduce(.Or, position > V3{ 1, 1, 1 })) continue;
+        filtered_positions[vertex_count] = position;
+        vertex_count += 1;
+    }
+
+    // const the_zmean = zmean(filtered_positions) ;
+    // for (filtered_positions) |*v| v.*[2] = the_zmean;
+
+    var floatPosActual = loops.getNewSlice(@intCast(u16, vertex_count));
+    for (floatPosActual) |*v, i| v.* = filtered_positions[i];
+}
+
+const colors = struct {
+    const white = [4]u8{ 255, 255, 255, 255 };
+    const red = [4]u8{ 255, 0, 0, 255 };
+};
+
+fn drawLoops(d_output: Img2D([4]u8), view: View) void {
+
+    // for each loop in loop_collection we know the internal coordinates (in [-1,1]) and
+    // can compute the coordinates in the pixel space of the surface using pointToPixel()
+    // then we can draw them connected with lines.
+    var i: u16 = 0;
+    while (i < loops.volume_loop_max_index) : (i += 1) {
+        const vl = loops.getVolumeLoop(i);
+        const sl = volumeLoop2ScreenLoop(view, vl);
+        drawScreenLoop(sl, d_output);
+    }
+}
+
 const loops = struct {
-    const max_loop_length: u32 = 1000;
-    const avg_loop_length: u32 = 100;
-    const max_n_loops: u32 = 1000;
-    const size_base_mem = avg_loop_length * max_n_loops;
 
-    var volume_loop_mem: [size_base_mem][3]f32 = undefined; // 100 pix * 2 verts / pix * 4bytes / vert
-    var volume_loop_indices = [_]usize{0} ** 100; // up to 100 indices into loop memory
-    var n_vl_indices: usize = 0; // number of indices currently in use
+    // This buffer stores pixel locations as a loop is being drawn before it's embeded and saved.
+    // It also stores pixel locations as a loop is converted from []V3 -> []U2 before it's drawn to screen.
+    var temp_screen_loop: [10_000][2]u32 = undefined; // will crash if a screen loop exceeds 10_000 points (at 16ms frame rate that's 160s of drawing)
+    var temp_screen_loop_len: usize = 0;
 
-    var screen_loop_mem: [9000 * 2 * 4]u8 = undefined; // 100 pix * 2 verts / pix * 4bytes / vert
-    var screen_loop: std.ArrayList([2]u32) = undefined;
+    // Buffer that stores 3D coordinates of knots that form Loops.
+    // Works like a simple memory allocator for []V3 slices.
+    var volume_loop_mem: [1000 * 100][3]f32 = undefined; // 1000 loops * 100 avg-loop-length
+    var volume_loop_indices = [_]usize{0} ** 1000; // up to 100 indices into loop memory
+    var volume_loop_max_index: usize = 0; // number of indices currently in use
 
-    pub fn getVolumeLoop(n: u16) [][3]f32 {
+    pub fn getVolumeLoop(n: u16) VolumeLoop {
         return volume_loop_mem[volume_loop_indices[n]..volume_loop_indices[n + 1]];
     }
 
     pub fn getNewSlice(nitems: u16) [][3]f32 {
-        const idx0 = volume_loop_indices[n_vl_indices];
+        const idx0 = volume_loop_indices[volume_loop_max_index];
         const idx1 = idx0 + nitems;
-        volume_loop_indices[n_vl_indices + 1] = idx1;
-        n_vl_indices += 1;
+        volume_loop_indices[volume_loop_max_index + 1] = idx1;
+        volume_loop_max_index += 1;
         return volume_loop_mem[idx0..idx1];
     }
 };
+
+// const anno = struct {
+//     // ArrayList ? can add and set
+//     const loops = ...
+//     const rects = ...
+//     pub fn drawLoops()
+//     pub fn drawRects()
+// }
 
 const Screen = struct {
     surface: *cc.SDL_Surface,
@@ -805,13 +919,16 @@ const Window = struct {
 
 // };
 
+// const myCL = struct {
+// }
+
 ///
 ///  Load and Render TIFF with OpenCL and SDL.
 ///
 pub fn main() !u8 {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    var fba = std.heap.FixedBufferAllocator.init(&loops.screen_loop_mem);
-    loops.screen_loop = try std.ArrayList([2]u32).initCapacity(fba.allocator(), 9000);
+    // var fba = std.heap.FixedBufferAllocator.init(&loops.screen_loop_mem);
+    // loops.screen_loop = try std.ArrayList([2]u32).initCapacity(fba.allocator(), 9000);
 
     // temporary stack allocator
     var arena = std.heap.ArenaAllocator.init(gpa.allocator());
@@ -974,7 +1091,8 @@ pub fn main() !u8 {
                     const px = @intCast(u31, event.button.x);
                     const py = @intCast(u31, event.button.y);
                     mouse.mouse_location = .{ px, py };
-                    loops.screen_loop.clearRetainingCapacity();
+                    loops.temp_screen_loop_len = 0;
+                    // loops.screen_loop.clearRetainingCapacity();
                 },
                 cc.SDL_MOUSEBUTTONUP => blk: {
                     mouse.mousedown = false;
@@ -982,10 +1100,10 @@ pub fn main() !u8 {
 
                     if (mouse.draw_mode == false) break :blk;
 
-                    if (loops.screen_loop.items.len < 3) break :blk;
+                    if (loops.temp_screen_loop_len < 3) break :blk;
 
-                    try embedLoops(gpa.allocator(), loops.screen_loop.items, view, d_zbuffer);
-                    print("The number of total objects is {} \n", .{loops.n_vl_indices});
+                    try embedLoops(gpa.allocator(), loops.temp_screen_loop[0..loops.temp_screen_loop_len], view, d_zbuffer);
+                    print("The number of total objects is {} \n", .{loops.volume_loop_max_index});
                 },
                 cc.SDL_MOUSEMOTION => blk: {
                     if (mouse.mousedown == false) break :blk;
@@ -1005,10 +1123,11 @@ pub fn main() !u8 {
                     mouse.mouse_location.?[1] = py;
 
                     if (mouse.draw_mode) {
-                        // var pix = @ptrCast([*c][4]u8, surface.pixels.?);
                         im.drawLine2(window.pix, nx, x_old, y_old, px, py, colors.white);
                         try window.update();
-                        loops.screen_loop.appendAssumeCapacity(.{ px, py });
+                        // loops.screen_loop.appendAssumeCapacity(.{ px, py });
+                        loops.temp_screen_loop[loops.temp_screen_loop_len] = .{ px, py };
+                        loops.temp_screen_loop_len += 1;
                     } else {
                         mouseMoveCamera(px, py, x_old, y_old, &view);
                         window.needs_update = true;
@@ -1047,11 +1166,11 @@ pub fn main() !u8 {
 
 /// generate "cool" colormap
 fn cmapCool() [256][4]u8 {
-    var res: [256][4]u8 = undefined;
-    const reds = piecewiseLinearInterpolation(&[_][3]f32{ .{ 0, 0, 0 }, .{ 1, 1, 1 } });
-    const greens = piecewiseLinearInterpolation(&[_][3]f32{ .{ 0, 1, 1 }, .{ 1, 0, 0 } });
-    const blues = piecewiseLinearInterpolation(&[_][3]f32{ .{ 0, 1, 1 }, .{ 1, 1, 1 } });
-    for (res) |*r, i| {
+    var cmap: [256][4]u8 = undefined;
+    const reds = piecewiseLinearInterpolation(256, &[_][3]f32{ .{ 0, 0, 0 }, .{ 1, 1, 1 } });
+    const greens = piecewiseLinearInterpolation(256, &[_][3]f32{ .{ 0, 1, 1 }, .{ 1, 0, 0 } });
+    const blues = piecewiseLinearInterpolation(256, &[_][3]f32{ .{ 0, 1, 1 }, .{ 1, 1, 1 } });
+    for (cmap) |*r, i| {
         r.* = .{
             @floatToInt(u8, reds[i] * 255),
             @floatToInt(u8, greens[i] * 255),
@@ -1059,19 +1178,19 @@ fn cmapCool() [256][4]u8 {
             255,
         };
     }
-    return res;
+    return cmap;
 }
 
 /// Max of ten segments per color
-const LSCmap = struct {
-    red: [10]?[3]f32,
-    green: [10]?[3]f32,
-    blue: [10]?[3]f32,
-};
+// const LSCmap = struct {
+//     red: [10]?[3]f32,
+//     green: [10]?[3]f32,
+//     blue: [10]?[3]f32,
+// };
 
-///
-fn piecewiseLinearInterpolation(pieces: []const [3]f32) [256]f32 {
-    var res = [_]f32{0} ** 256;
+/// Follows matplotlib colormap convention for piecewise linear colormaps
+fn piecewiseLinearInterpolation(comptime n: u16, pieces: []const [3]f32) [n]f32 {
+    var res = [_]f32{0} ** n;
     var k: usize = 0;
     for (res) |*r, i| {
         const x = @intToFloat(f32, i) / 255; // in [0,1] inclusive
@@ -1096,7 +1215,7 @@ test "test piecewiseLinearInterp" {
         .{ 0.75, 0.0, 1 },
         .{ 1.0, 0.0, 1 },
     };
-    const res = piecewiseLinearInterpolation(pieces[0..]);
+    const res = piecewiseLinearInterpolation(256, pieces[0..]);
     print("\nres = {d}\n", .{res});
 }
 
@@ -1147,105 +1266,6 @@ const delta = struct {
         0, -s, c,
     };
 };
-
-fn drawScreenLoop(sl: ScreenLoop, d_output: Img2D([4]u8)) void {
-    // var pix = @ptrCast([*c][4]u8, surface.pixels.?);
-    if (sl.len == 0) return;
-
-    for (sl) |pt, i| {
-        if (i == 0) continue;
-        im.drawLineInBounds(
-            [4]u8,
-            d_output,
-            @intCast(u31, sl[i - 1][0]),
-            @intCast(u31, sl[i - 1][1]),
-            @intCast(u31, pt[0]),
-            @intCast(u31, pt[1]),
-            colors.white,
-        );
-    }
-
-    // DONT ACTUALLY COMPLETE THE LOOP.
-
-    // im.drawLine(
-    //     [4]u8,
-    //     d_output,
-    //     @intCast(u31, sl[0][0]),
-    //     @intCast(u31, sl[0][1]),
-    //     @intCast(u31, sl[sl.len - 1][0]),
-    //     @intCast(u31, sl[sl.len - 1][1]),
-    //     colors.white,
-    // );
-}
-
-/// Returns slice (ptr type) to existing memory in `loops.screen_loop`
-fn volumeLoop2ScreenLoop(view: View, vl: VolumeLoop) ScreenLoop {
-    loops.screen_loop.clearRetainingCapacity();
-    for (vl) |pt3| {
-        loops.screen_loop.appendAssumeCapacity(v22U2(pointToPixel(view, pt3)));
-    }
-    return loops.screen_loop.items;
-}
-
-// fn screenLoop2VolumeLoop(sl: ScreenLoop, view: View, zbuf: Img2D(f32)) VolumeLoop {}
-
-fn zmean(filtered_positions: [][3]f32) f32 {
-    var total: f32 = 0;
-    for (filtered_positions) |v| total += v[2];
-    return total / @intToFloat(f32, filtered_positions.len);
-}
-
-/// embed ScreenLoop inside volume with normalized coords [-1,1]^3
-///  since our data is noisy, we can't always expect that the maxval of the intensity is from
-///  the object we intend. we could deal with this by _denoising_ the loop depth, the image depth buffer,
-///
-fn embedLoops(al: std.mem.Allocator, loop: ScreenLoop, view: View, depth_buffer: Img2D(f32)) !void {
-
-    // NOTE: we're looping over pixel knots in our Loop, but this does not include pixels drawn interpolated between knot points.
-    var depth_mean = @as(f32, 0);
-    for (loop) |v| {
-        var depth = depth_buffer.get(v[0], v[1]).*; // in [0,1] coords
-        depth_mean += depth;
-    }
-    depth_mean /= @intToFloat(f32, loop.len);
-
-    var filtered_positions = try al.alloc([3]f32, 900);
-    defer al.free(filtered_positions);
-    var vertex_count: u16 = 0;
-
-    for (loop) |v| {
-        const ray = pixelToRay(view, v);
-        const position = ray.orig + @splat(3, depth_mean) * ray.direc;
-        if (@reduce(.Or, position < V3{ -1, -1, -1 })) continue;
-        if (@reduce(.Or, position > V3{ 1, 1, 1 })) continue;
-        filtered_positions[vertex_count] = position;
-        vertex_count += 1;
-    }
-
-    // const the_zmean = zmean(filtered_positions) ;
-    // for (filtered_positions) |*v| v.*[2] = the_zmean;
-
-    var floatPosActual = loops.getNewSlice(@intCast(u16, vertex_count));
-    for (floatPosActual) |*v, i| v.* = filtered_positions[i];
-}
-
-const colors = struct {
-    const white = [4]u8{ 255, 255, 255, 255 };
-    const red = [4]u8{ 255, 0, 0, 255 };
-};
-
-fn drawLoops(d_output: Img2D([4]u8), view: View) void {
-
-    // for each loop in loop_collection we know the internal coordinates (in [-1,1]) and
-    // can compute the coordinates in the pixel space of the surface using pointToPixel()
-    // then we can draw them connected with lines.
-    var i: u16 = 0;
-    while (i < loops.n_vl_indices) : (i += 1) {
-        const vl = loops.getVolumeLoop(i);
-        const sl = volumeLoop2ScreenLoop(view, vl);
-        drawScreenLoop(sl, d_output);
-    }
-}
 
 /// maps a pixel on the camera to a ray that points into the image volume.
 fn pixelToRay(view: View, pix: U2) Ray {
