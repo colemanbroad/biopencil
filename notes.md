@@ -205,6 +205,12 @@ r_z =         -sin(theta) * cos(phi), -sin(phi),   cos(theta) * cos(phi)
 ```
 
 
+# Let's rethink how we describe kernel parameters
+
+Parameters may be read or write (rw), they may be written once or repeatedly (1!)...
+they may describe buffers that require special buffer commands, or non-buffer args (bn).
+
+
 # Tracking Mode
 
 - [ ] allow object to occlude tracking tails
