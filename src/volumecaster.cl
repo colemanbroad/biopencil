@@ -90,7 +90,7 @@ void printview(View v) {
   printf("view matrix \n" , v.view_matrix);
   for (int i=0;i<9;i++) {printf("%2.2f ",v.view_matrix[i]);}
   printf("\nfront_scale %2.2v3hlf \n" , v.front_scale);
-  printf("back_scale %2.2v3hlf  \n" , v.back_scale);
+  printf("back_scale %2.2v3hlf" , v.back_scale);
   printf("anisotropy %2.2v3hlf  \n" , v.anisotropy);
   printf("screen_size %3v2d \n" , v.screen_size);
 }
@@ -166,12 +166,12 @@ __kernel void max_project_float(
                   read_only image3d_t volume,
                   global uchar4 *d_output,
                   global float *d_zbuffer,
-                  read_only global uchar4 *colormap,
-                  uint Nx, 
-                  uint Ny,
-                  float2 global_minmax,
+                  global read_only uchar4 *colormap,
+                  read_only uint Nx, 
+                  read_only uint Ny,
+                  read_only float2 global_minmax,
                   read_only View view,
-                  ushort3 volume_dims
+                  read_only ushort3 volume_dims
                   )
 {
 
@@ -184,15 +184,14 @@ __kernel void max_project_float(
   float boxMax_z  =  1.0; // (1/11.0);
 
   // intensity clip
-  float clipLow   = 0.0;
-  float clipHigh  = 1.0;
-  float gamma     = 1.0;
-  float alpha_pow = 0.1;
+  // float clipLow   = 0.0;
+  // float clipHigh  = 1.0;
+  // float gamma     = 1.0;
 
   // int zdepth = get_image_depth(volume);
 
   // for multi-pass rendering
-  int currentPart = 0;
+  // int currentPart = 0;
   
   // NORMALIZED COORDS IN [0,1] ! Not [-1,1] !
   const sampler_t volumeSampler = CLK_NORMALIZED_COORDS_TRUE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST; // CLK_FILTER_NEAREST
@@ -200,6 +199,17 @@ __kernel void max_project_float(
   uint x = get_global_id(0);
   uint y = get_global_id(1);
   uint idx = x+Nx*y;
+
+  // float maxxy = 0;
+  // for (int i=0; i<volume_dims[2]; i++) {
+  //   float4 pos = (float4){(float3){x,y,i} / convert_float3(volume_dims) , 0};
+  //   float val = read_imagef(volume, volumeSampler, pos).x;
+  //   if (val > maxxy) {
+  //     maxxy = val;
+  //   }
+  // }
+  // d_output[idx] = maxxy;
+  // return; 
 
   // if (idx==0) {
   //   printview(view);
@@ -234,9 +244,10 @@ __kernel void max_project_float(
   // if (tnear < 0.0f) tnear = 0.0f;
   // const int reducedSteps = maxSteps; // /numParts
   // const int maxSteps = int(fabs(tfar-tnear)/dt); // assume dt = 1;
-  const int maxSteps = 30; //15;
-  // const float dt = fabs(tfar-tnear)/maxSteps; //((reducedSteps/LOOPUNROLL)*LOOPUNROLL);
-  const float dt = 1 / 35.0;
+  const int maxSteps = 100; //15;
+  const float dt = 2 * fabs(tfar-tnear)/maxSteps; //((reducedSteps/LOOPUNROLL)*LOOPUNROLL);
+  // const float dt = 1 / 35.0;
+  // const float dt = 1.0 / dot(r.direc, convert_float3(volume_dims)) * 4.0;
   // const float dt = 0.1; // dot(r.direc, view.anisotropy);
   
   // delta_pos, pos, maxValPosition are re-normalized into [0,1] for access into read_imagef() with normalized coords
@@ -244,10 +255,24 @@ __kernel void max_project_float(
   float4 pos = (float4){(r.orig+tnear*r.direc)/2 + (float3)(0.5), 0};
   float4 maxValPosition = pos;
 
+
+  
+  if (x==300 && y==300) {
+    printview(view);
+    printf("RAY = \n");
+    printray(r);
+    printf("tnear %6.3f, tfar = %6.3f \n", tnear, tfar);
+    // printf("currentVal = %6.3f \n", );
+    printf("The INITIAL pos = %6.3v4fhl \n", pos);
+    printf("delta_pos = %6.3v4fhl \n", delta_pos);
+    printf("dt = %6.3f \n", dt);
+  }
+
   // initial values for output
   float maxVal = 0;
   int maxValDepth = 0;
 
+  float alpha_pow = 0.1;
 
   // Perform the max projection
   if (alpha_pow==0) {
@@ -256,8 +281,9 @@ __kernel void max_project_float(
 
     for(int i=0; i <= maxSteps; ++i){
 
-      // if (idx==181248) {printf("position = %2.2v4hlf \n", npos);}
       currentVal = read_imagef(volume, volumeSampler, pos).x;
+      // if ((pos.x-0.5)<1e-2 and (pos.)) {printf("position = %2.2v4hlf \n", pos);}
+      // if (idx%1000==0) {printf("currentVal = %6.3f \n", currentVal);}
       maxValDepth = (currentVal > maxVal) ? i : maxValDepth;
       maxValPosition = (currentVal > maxVal) ? pos : maxValPosition;
       maxVal = fmax(maxVal,currentVal);
@@ -275,6 +301,11 @@ __kernel void max_project_float(
     for(int i=0; i <= maxSteps; ++i){
 
         currentVal = read_imagef(volume, volumeSampler, pos).x;
+
+        if (x==300 && y==300) {
+          printf("currentVal = %6.3f \n", currentVal);
+          printf("pos = %6.3v4fhl \n", pos);
+        }
         // currentVal = (maxVal == 0)?currentVal:(currentVal-clipLow)/(clipHigh-clipLow);
         maxValDepth = (cumsum * currentVal > maxVal) ? i : maxValDepth;
         maxValPosition = (currentVal > maxVal) ? pos : maxValPosition;
@@ -291,14 +322,15 @@ __kernel void max_project_float(
   // float4 maxValPosition = r.orig + r.direc*maxValDepth;
   float zDepth = maxValPosition.z;
   maxVal = (maxVal - global_minmax[0])/(global_minmax[1] - global_minmax[0]);
+  float gamma = 1.0;
   maxVal = clamp(pow(maxVal,gamma),0.f,1.f);
-  float alphaVal = clamp(maxVal,0.f,1.f);
+  // float alphaVal = clamp(maxVal,0.f,1.f);
   
   // d_output[idx] = convert_uchar4(temp);
   uchar4 color = colormap[uchar(255*zDepth)];
   uchar4 val;
   val = convert_uchar4(convert_float4(color) * float4(maxVal));
-  // val = uchar4(maxVal*255);
+  // val = (uchar4){255,maxVal,maxVal,255};
   // val.z = 0;
   d_output[idx] = val;
 

@@ -5,6 +5,8 @@ const assert = std.debug.assert;
 const expect = std.testing.expect;
 const eql = std.mem.eql;
 
+const milliTimestamp = std.time.milliTimestamp;
+
 const Img2D = im.Img2D;
 const Img3D = im.Img3D;
 
@@ -312,15 +314,42 @@ pub const DevCtxQueProg = struct {
     }
 };
 
+fn containsOnly(sequence: []const u8, charset: []const u8) bool {
+    blk: for (sequence) |s| {
+        for (charset) |c| {
+            if (s == c) break :blk;
+        }
+        return false;
+    }
+    return true;
+}
+
+test "test containsonly" {
+    const a = "aabbccdefgaabbcc";
+    const b = "bcadgfe";
+    try expect(containsOnly(a, b));
+}
+
+const ArgTypes = enum {
+    buffer_write_once,
+    buffer_write_everytime,
+    buffer_read_everytime,
+    nonbuf_write_once,
+    nonbuf_write_everytime,
+    nonbuf_read_everytime,
+};
+
 pub fn Kernel(
-    comptime _kernName: []const u8,
-    comptime _argtype: []const u8,
+    comptime _kern_name: []const u8,
+    comptime _argtype: []const ArgTypes,
 ) type {
+    // assert(containsOnly(_argtype, "rwxi"));
+
     return struct {
         const Self = @This();
 
-        const kernName: []const u8 = _kernName;
-        const argtype: []const u8 = _argtype;
+        const kern_name: []const u8 = _kern_name;
+        const argtype: []const ArgTypes = _argtype;
 
         kernel: cl.cl_kernel,
         buffers: [argtype.len]cl.cl_mem,
@@ -342,7 +371,7 @@ pub fn Kernel(
             var errCode: cl.cl_int = undefined;
 
             // Create a Kernel
-            var kernel = cl.clCreateKernel(dcqp.program, &kernName[0], &errCode);
+            var kernel = cl.clCreateKernel(dcqp.program, &kern_name[0], &errCode);
             try testForCLError(errCode);
 
             // TODO: Do we need to create buffers for all arguments or only for arrays?
@@ -353,88 +382,38 @@ pub fn Kernel(
             // as appropriate. Create buffers, add data to buffers, pass buffers as kernel args.
             inline for (argtype) |argT, i| {
                 const arg = args[i];
-                // const size = @sizeOf(std.meta.Elem(@TypeOf(arg))) * arg.len; // @sizeOf(@typeInfo(@TypeOf(arg)).Pointer.child);
                 const T = @TypeOf(arg);
                 const size = switch (@typeInfo(T)) {
                     .Pointer => @sizeOf(std.meta.Elem(T)) * arg.len, // assume slice or array
                     else => @sizeOf(T),
                 };
 
-                if (argT == 'w') {
-                    // const child = @typeInfo(@TypeOf(arg)).Pointer.child;
-                    // @compileLog(child, @sizeOf(child), arg.len * @sizeOf(child), @sizeOf(@TypeOf(arg)));
-                    // const size = arg.len * @sizeOf(@typeInfo(@TypeOf(arg)).child);
-                    buffers[i] = cl.clCreateBuffer(dcqp.ctx, cl.CL_MEM_WRITE_ONLY, size, null, &errCode);
-                    try testForCLError(errCode);
-                    errCode = cl.clEnqueueWriteBuffer(dcqp.command_queue, buffers[i], cl.CL_TRUE, 0, size, &arg[0], 0, null, null);
-                    try testForCLError(errCode);
-                    errCode = cl.clSetKernelArg(kernel, i, @sizeOf(cl.cl_mem), &buffers[i]);
-                    try testForCLError(errCode);
-                } else if (argT == 'r') {
-                    buffers[i] = cl.clCreateBuffer(dcqp.ctx, cl.CL_MEM_READ_ONLY, size, null, &errCode);
-                    try testForCLError(errCode);
-                    errCode = cl.clSetKernelArg(kernel, i, @sizeOf(cl.cl_mem), &buffers[i]);
-                    try testForCLError(errCode);
-                } else if (argT == 'i') {
-                    buffers[i] = cl.clCreateBuffer(dcqp.ctx, cl.CL_MEM_READ_ONLY, size, null, &errCode);
-                    try testForCLError(errCode);
-                    errCode = cl.clSetKernelArg(kernel, i, @sizeOf(cl.cl_mem), &buffers[i]);
-                    try testForCLError(errCode);
-                } else {
-                    errCode = cl.clSetKernelArg(kernel, i, size, &arg);
-                    try testForCLError(errCode);
+                switch (argT) {
+                    .buffer_write_once, .buffer_write_everytime => {
+                        buffers[i] = cl.clCreateBuffer(dcqp.ctx, cl.CL_MEM_WRITE_ONLY, size, null, &errCode);
+                        try testForCLError(errCode);
+                        errCode = cl.clEnqueueWriteBuffer(dcqp.command_queue, buffers[i], cl.CL_TRUE, 0, size, &arg[0], 0, null, null);
+                        try testForCLError(errCode);
+                        errCode = cl.clSetKernelArg(kernel, i, @sizeOf(cl.cl_mem), &buffers[i]);
+                        try testForCLError(errCode);
+                    },
+                    .buffer_read_everytime => {
+                        buffers[i] = cl.clCreateBuffer(dcqp.ctx, cl.CL_MEM_READ_ONLY, size, null, &errCode);
+                        try testForCLError(errCode);
+                        errCode = cl.clSetKernelArg(kernel, i, @sizeOf(cl.cl_mem), &buffers[i]);
+                        try testForCLError(errCode);
+                    },
+                    else => {
+                        errCode = cl.clSetKernelArg(kernel, i, size, &arg);
+                        try testForCLError(errCode);
+                    },
                 }
             }
 
-            var res = .{
+            return .{
                 .kernel = kernel,
                 .buffers = buffers,
             };
-
-            return res;
-
-            // for (nproc) |n, i| res.nproc_fixed[i] = n;
-        }
-
-        /// DEPRECATED
-        pub fn reEnqueue(
-            self: Self,
-            dcqp: DevCtxQueProg,
-            args: anytype,
-        ) !void {
-            var errCode: cl.cl_int = undefined;
-
-            // Loop over the arguments we want to pass to the kernel. Set read/write flags
-            // as appropriate. Create buffers, add data to buffers, pass buffers as kernel args.
-            inline for (argtype) |argT, i| {
-                const arg = args[i];
-                // const size = @sizeOf(std.meta.Elem(@TypeOf(arg))) * arg.len; // @sizeOf(@typeInfo(@TypeOf(arg)).Pointer.child);
-                const T = @TypeOf(arg);
-                const size = switch (@typeInfo(T)) {
-                    .Pointer => @sizeOf(std.meta.Elem(T)) * arg.len, // assume slice or array
-                    else => @sizeOf(T),
-                };
-
-                if (argT == 'w') {
-                    errCode = cl.clEnqueueWriteBuffer(dcqp.command_queue, self.buffers[i], cl.CL_TRUE, 0, size, &arg[0], 0, null, null);
-                    try testForCLError(errCode);
-                    // errCode = cl.clSetKernelArg(kernel, i, @sizeOf(cl.cl_mem), &self.buffers[i]);
-                    // try testForCLError(errCode);
-                } else if (argT == 'r') {
-                    // self.buffers[i] = cl.clCreateBuffer(dcqp.ctx, cl.CL_MEM_READ_ONLY, size, null, &errCode);
-                    // try testForCLError(errCode);
-                    // errCode = cl.clSetKernelArg(kernel, i, @sizeOf(cl.cl_mem), &self.buffers[i]);
-                    // try testForCLError(errCode);
-                } else if (argT == 'i') {
-                    // self.buffers[i] = cl.clCreateBuffer(dcqp.ctx, cl.CL_MEM_READ_ONLY, size, null, &errCode);
-                    // try testForCLError(errCode);
-                    // errCode = cl.clSetKernelArg(kernel, i, @sizeOf(cl.cl_mem), &self.buffers[i]);
-                    // try testForCLError(errCode);
-                } else {
-                    // errCode = cl.clSetKernelArg(kernel, i, size, &arg);
-                    // try testForCLError(errCode);
-                }
-            }
         }
 
         /// Execute kernel
@@ -454,31 +433,27 @@ pub fn Kernel(
             // as appropriate. Create buffers, add data to buffers, pass buffers as kernel args.
             inline for (argtype) |argT, i| {
                 const arg = args[i];
-                // const size = @sizeOf(std.meta.Elem(@TypeOf(arg))) * arg.len; // @sizeOf(@typeInfo(@TypeOf(arg)).Pointer.child);
                 const T = @TypeOf(arg);
                 const size = switch (@typeInfo(T)) {
                     .Pointer => @sizeOf(std.meta.Elem(T)) * arg.len, // assume slice or array
                     else => @sizeOf(T),
                 };
 
-                if (argT == 'w') {
-                    errCode = cl.clEnqueueWriteBuffer(dcqp.command_queue, self.buffers[i], cl.CL_TRUE, 0, size, &arg[0], 0, null, null);
-                    try testForCLError(errCode);
-                    errCode = cl.clSetKernelArg(self.kernel, i, @sizeOf(cl.cl_mem), &self.buffers[i]);
-                    try testForCLError(errCode);
-                } else if (argT == 'r') {
-                    // self.buffers[i] = cl.clCreateBuffer(dcqp.ctx, cl.CL_MEM_READ_ONLY, size, null, &errCode);
-                    // try testForCLError(errCode);
-                    errCode = cl.clSetKernelArg(self.kernel, i, @sizeOf(cl.cl_mem), &self.buffers[i]);
-                    try testForCLError(errCode);
-                } else if (argT == 'i') {
-                    // self.buffers[i] = cl.clCreateBuffer(dcqp.ctx, cl.CL_MEM_READ_ONLY, size, null, &errCode);
-                    // try testForCLError(errCode);
-                    errCode = cl.clSetKernelArg(self.kernel, i, @sizeOf(cl.cl_mem), &self.buffers[i]);
-                    try testForCLError(errCode);
-                } else {
-                    errCode = cl.clSetKernelArg(self.kernel, i, size, &arg);
-                    try testForCLError(errCode);
+                switch (argT) {
+                    .buffer_write_everytime => {
+                        errCode = cl.clEnqueueWriteBuffer(dcqp.command_queue, self.buffers[i], cl.CL_TRUE, 0, size, &arg[0], 0, null, null);
+                        try testForCLError(errCode);
+                        errCode = cl.clSetKernelArg(self.kernel, i, @sizeOf(cl.cl_mem), &self.buffers[i]);
+                        try testForCLError(errCode);
+                    },
+                    .nonbuf_write_everytime => {
+                        // errCode = cl.clSetKernelArg(self.kernel, i, @sizeOf(cl.cl_mem), &self.buffers[i]);
+                        // try testForCLError(errCode);
+                        errCode = cl.clSetKernelArg(self.kernel, i, size, &arg);
+                        try testForCLError(errCode);
+
+                    },
+                    else => {},
                 }
             }
 
@@ -486,25 +461,32 @@ pub fn Kernel(
             try testForCLError(errCode);
 
             inline for (argtype) |argT, i| {
-                if (argT == 'r') {
-                    const arg = args[i];
-                    const T = @TypeOf(arg);
-                    const TI = @typeInfo(T);
-                    const size = switch (TI) {
-                        .Pointer => @sizeOf(std.meta.Elem(T)) * arg.len, // assume slice or array
-                        else => @sizeOf(T),
-                    };
+                switch (argT) {
+                    .buffer_read_everytime => {
+                        const arg = args[i];
+                        const T = @TypeOf(arg);
+                        const size = switch (@typeInfo(T)) {
+                            .Pointer => @sizeOf(std.meta.Elem(T)) * arg.len, // assume slice or array
+                            else => @sizeOf(T),
+                        };
 
-                    errCode = cl.clEnqueueReadBuffer(dcqp.command_queue, self.buffers[i], cl.CL_TRUE, 0, size, &arg[0], 0, null, null);
-                    try testForCLError(errCode);
+                        errCode = cl.clEnqueueReadBuffer(dcqp.command_queue, self.buffers[i], cl.CL_TRUE, 0, size, &arg[0], 0, null, null);
+                        try testForCLError(errCode);
+                    },
+                    else => {},
                 }
             }
         }
 
         pub fn deinit(self: Self) void {
             for (self.buffers) |b, i| {
-                if (argtype[i] == 'x') continue;
-                _ = cl.clReleaseMemObject(b); // TODO: what happens to defer inside of inline for ?
+                // if (argtype[i] == 'x') continue;
+                switch (argtype[i]) {
+                    .buffer_read_everytime, .buffer_write_everytime, .buffer_write_once => {
+                        _ = cl.clReleaseMemObject(b); // TODO: what happens to defer inside of inline for ?
+                    },
+                    else => {},
+                }
             }
             _ = cl.clReleaseKernel(self.kernel);
         }
@@ -536,10 +518,6 @@ pub fn img2CLImg(
         },
     };
 
-    // const data_type = switch (T) {
-    //     f32 => cl.CL_FLOAT,
-    //     else => unreachable,
-    // };
     const data_type = cl.CL_FLOAT;
 
     // TODO: do img_format and description need to live beyond function scope?
@@ -783,6 +761,9 @@ fn drawLoops(d_output: Img2D([4]u8), view: View) void {
     }
 }
 
+// var mybuf = [_]u8{0} ** 10_000;
+// const fba = std.heap.FixedBufferAllocator(mybuf);
+
 const loops = struct {
 
     // This buffer stores pixel locations as a loop is being drawn before it's embeded and saved.
@@ -807,6 +788,17 @@ const loops = struct {
         volume_loop_max_index += 1;
         return volume_loop_mem[idx0..idx1];
     }
+
+    // pub fn handleMouseDown() {}
+    // pub fn handleMouseUp() {}
+    // pub fn handleMouseMove() {}
+
+};
+
+const rects = struct {
+    var temp_screen_rect: [2]U2 = undefined;
+    var all_volume_rect_mem: [100][3]U2 = undefined;
+    var all_volume_rect_count: usize = 0;
 };
 
 // const anno = struct {
@@ -823,15 +815,29 @@ const Screen = struct {
     update_count: u64,
 };
 
+// var mouse_mode =
+// TODO: Use mouse modes to dispatch early to loop, rect, view mouse functions.
+// Let the mode determine how to handle key and mouse input.
 const Mouse = struct {
     mousedown: bool,
     mouse_location: ?[2]u31,
-    draw_mode: bool,
+    loop_draw_mode: enum { view, loop, rect },
 };
 
 // for timings
-var t1: i64 = 0;
-var t2: i64 = 0;
+// var t1: i64 = 0;
+// var t2: i64 = 0;
+
+test "test window creation" {
+    const win = try Window.init(1000, 800);
+    try win.update();
+}
+
+const SDL_WINDOWPOS_UNDEFINED = @bitCast(c_int, cc.SDL_WINDOWPOS_UNDEFINED_MASK);
+
+// For some reason, this isn't parsed automatically. According to SDL docs, the
+// surface pointer returned is optional!
+extern fn SDL_GetWindowSurface(window: *cc.SDL_Window) ?*cc.SDL_Surface;
 
 const Window = struct {
     sdl_window: *cc.SDL_Window,
@@ -842,15 +848,13 @@ const Window = struct {
     update_count: u64,
 
     const This = @This();
-    const SDL_WINDOWPOS_UNDEFINED = @bitCast(c_int, cc.SDL_WINDOWPOS_UNDEFINED_MASK);
-
-    // For some reason, this isn't parsed automatically. According to SDL docs, the
-    // surface pointer returned is optional!
-    extern fn SDL_GetWindowSurface(window: *cc.SDL_Window) ?*cc.SDL_Surface;
 
     /// WARNING: c managed heap memory mixed with our custom allocator
     pub fn init(nx: u32, ny: u32) !This {
-        t1 = std.time.milliTimestamp();
+        var t1: i64 = undefined;
+        var t2: i64 = undefined;
+
+        t1 = milliTimestamp();
         const window = cc.SDL_CreateWindow(
             "Main Volume",
             SDL_WINDOWPOS_UNDEFINED,
@@ -862,24 +866,33 @@ const Window = struct {
             cc.SDL_Log("Unable to create window: %s", cc.SDL_GetError());
             return error.SDLInitializationFailed;
         };
-        t2 = std.time.milliTimestamp();
+        t2 = milliTimestamp();
         print("CreateWindow [{}ms]\n", .{t2 - t1});
 
-        t1 = std.time.milliTimestamp();
+        t1 = milliTimestamp();
         const surface = SDL_GetWindowSurface(window) orelse {
             cc.SDL_Log("Unable to get window surface: %s", cc.SDL_GetError());
             return error.SDLInitializationFailed;
         };
-        t2 = std.time.milliTimestamp();
+        t2 = milliTimestamp();
         print("SDL_GetWindowSurface [{}ms]\n", .{t2 - t1});
 
-        return .{
+        // @breakpoint();
+
+        const res = .{
             .sdl_window = window,
             .surface = surface,
             .pix = @ptrCast([*c][4]u8, surface.pixels.?),
             .needs_update = false,
             .update_count = 0,
         };
+
+        res.pix[50] = .{ 255, 255, 255, 255 };
+        res.pix[51] = .{ 255, 255, 255, 255 };
+        res.pix[52] = .{ 255, 255, 255, 255 };
+        res.pix[53] = .{ 255, 255, 255, 255 };
+
+        return res;
     }
 
     fn update(this: This) !void {
@@ -927,8 +940,6 @@ const Window = struct {
 ///
 pub fn main() !u8 {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    // var fba = std.heap.FixedBufferAllocator.init(&loops.screen_loop_mem);
-    // loops.screen_loop = try std.ArrayList([2]u32).initCapacity(fba.allocator(), 9000);
 
     // temporary stack allocator
     var arena = std.heap.ArenaAllocator.init(gpa.allocator());
@@ -939,42 +950,71 @@ pub fn main() !u8 {
         "volumecaster.cl",
     };
 
-    // setup OpenCL Contex Queue
-    t1 = std.time.milliTimestamp();
-    var dcqp = try DevCtxQueProg.init(temp, files);
-    defer dcqp.deinit();
-    t2 = std.time.milliTimestamp();
-    print("DevCtxQueProg.init [{}ms]\n", .{t2 - t1});
+    var t1: i64 = undefined;
+    var t2: i64 = undefined;
 
-    // Load TIFF image
-    t1 = std.time.milliTimestamp();
-    const grey = blk: {
+
+    const filename = blk: {
         const testtifname = "/Users/broaddus/Desktop/mpi-remote/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01/t100.tif";
         var arg_it = try std.process.argsWithAllocator(temp);
         _ = arg_it.skip(); // skip exe name
-        const filename = arg_it.next() orelse testtifname;
-        const img = try readTIFF3D(temp, filename);
-        break :blk img;
+        break :blk arg_it.next() orelse testtifname;
     };
-    t2 = std.time.milliTimestamp();
+
+    // Load TIFF image
+    // t1 = milliTimestamp();
+    const grey = try readTIFF3D(temp, filename);
+
+    // t2 = milliTimestamp();
     print("load TIFF and convert to f32 [{}ms]\n", .{t2 - t1});
 
-    t1 = std.time.milliTimestamp();
-    var img_cl = try img2CLImg(grey, dcqp);
+    // Setup SDL & open window
+    // t1 = milliTimestamp();
+    if (cc.SDL_Init(cc.SDL_INIT_VIDEO) != 0) {
+        cc.SDL_Log("Unable to initialize SDL: %s", cc.SDL_GetError());
+        return error.SDLInitializationFailed;
+    }
+    defer cc.SDL_Quit();
+    // t2 = milliTimestamp();
+    print("SDL_Init [{}ms]\n", .{t2 - t1});
+
+    // t1 = milliTimestamp();
     // this assumes x will be the bounding length, but it could be either!
     var nx: u31 = undefined;
     var ny: u31 = undefined;
     {
         const gx = @intToFloat(f32, grey.nx);
         const gy = @intToFloat(f32, grey.ny);
-        const scale = std.math.min3(1600 / gx, 1200 / gy, 2.0);
+        const scale = std.math.min3(1600 / gx, 1200 / gy, 1.3);
         nx = @floatToInt(u31, gx * scale);
         ny = @floatToInt(u31, gy * scale);
     }
+
     var d_output = try Img2D([4]u8).init(nx, ny);
     var d_zbuffer = try Img2D(f32).init(nx, ny);
+    // t2 = milliTimestamp();
+    print("initialize buffers [{}ms]\n", .{t2 - t1});
 
+    var windy = try Window.init(nx, ny);
+    // TODO: window deinit()
+
+    // t1 = milliTimestamp();
+    const mima = im.minmax(f32, grey.img);
+    print("mima = {d}\n",.{mima});
+    // t2 = milliTimestamp();
+    print("find min/max of f32 img [{}ms]\n", .{t2 - t1});
+
+    // setup OpenCL Contex Queue
+    // t1 = milliTimestamp();
+    var dcqp = try DevCtxQueProg.init(temp, files);
+    defer dcqp.deinit();
+    // t2 = milliTimestamp();
+    print("DevCtxQueProg.init [{}ms]\n", .{t2 - t1});
+
+    // setup arguments for max-project Kernel
+    // t1 = milliTimestamp();
     const colormap = cmapCool();
+    var img_cl = try img2CLImg(grey, dcqp);
     var view = View{
         .view_matrix = .{ 1, 0, 0, 0, 1, 0, 0, 0, 1 },
         .front_scale = .{ 1.1, 1.1, 1 },
@@ -982,17 +1022,7 @@ pub fn main() !u8 {
         .anisotropy = .{ 1, 1, 4 },
         .screen_size = .{ nx, ny },
     };
-    t2 = std.time.milliTimestamp();
-    print("initialize buffers [{}ms]\n", .{t2 - t1});
-
-    t1 = std.time.milliTimestamp();
-    const mima = im.minmax(f32, grey.img);
-    t2 = std.time.milliTimestamp();
-    print("find min/max of f32 img [{}ms]\n", .{t2 - t1});
-
     const volume_dims = [3]u16{ @intCast(u16, grey.nx), @intCast(u16, grey.ny), @intCast(u16, grey.nz) };
-
-    t1 = std.time.milliTimestamp();
     var args = .{
         img_cl,
         d_output.img,
@@ -1004,33 +1034,47 @@ pub fn main() !u8 {
         view,
         volume_dims,
     };
-    var kernel = try Kernel("max_project_float", "xrrwxxxxx").init(dcqp, args);
+
+    const argtypes = &[_]ArgTypes{
+        .nonbuf_write_once,
+        .buffer_read_everytime,
+        .buffer_read_everytime,
+        .buffer_write_once,
+        .nonbuf_write_once,
+        .nonbuf_write_once,
+        .nonbuf_write_once,
+        .nonbuf_write_everytime,
+        .nonbuf_write_once,
+    };
+
+    var kernel = try Kernel("max_project_float", argtypes).init(dcqp, args);
     defer kernel.deinit();
-    t2 = std.time.milliTimestamp();
-    print("define kernel [{}ms]\n", .{t2 - t1});
+    // t2 = milliTimestamp();
+    print("define kernel and args [{}ms]\n", .{t2 - t1});
 
-    t1 = std.time.milliTimestamp();
+    // t1 = milliTimestamp();
     try kernel.executeKernel(dcqp, args, &.{ nx, ny });
-    t2 = std.time.milliTimestamp();
-    print("call kernel [{}ms]\n", .{t2 - t1});
-
-    // Setup SDL stuff
-    t1 = std.time.milliTimestamp();
-    if (cc.SDL_Init(cc.SDL_INIT_VIDEO) != 0) {
-        cc.SDL_Log("Unable to initialize SDL: %s", cc.SDL_GetError());
-        return error.SDLInitializationFailed;
-    }
-    defer cc.SDL_Quit();
-    t2 = std.time.milliTimestamp();
-    print("SDL_Init [{}ms]\n", .{t2 - t1});
-
-    var window = try Window.init(grey.nx, grey.ny);
-    // TODO: window deinit()
+    // t2 = milliTimestamp();
+    print("exec kernel [{}ms]\n", .{t2 - t1});
+    
+    const mima2 = blk: {
+        var mn = [4]u8{0,0,0,0};
+        var mx = [4]u8{0,0,0,0};
+        for (d_output.img) |v| {
+            for (v) |vi,i| {
+                mn[i] = std.math.min(mn[i], vi);
+                mx[i] = std.math.max(mx[i], vi);
+            }
+        }
+        break :blk .{.mn=mn,.mx=mx};
+    };
+    print("mima of d_output.img {any}\n",.{mima2});
 
     // Update window
     addBBox(d_output, view);
-    window.setPixels(d_output.img);
-    try window.update();
+
+    windy.setPixels(d_output.img);
+    try windy.update();
 
     // done with startup . time to run the app
 
@@ -1040,15 +1084,13 @@ pub fn main() !u8 {
         .mousedown = false,
         // .mousePixbuffer = try temp.alloc([2]c_int, 10),
         .mouse_location = null,
-        .draw_mode = false,
+        .loop_draw_mode = .view,
     };
 
     // var boxpts:[8]Vec2 = undefined;
     // var imgnamebuffer:[100]u8 = undefined;
 
     while (running) {
-
-        // Event Handling
         var event: cc.SDL_Event = undefined;
         while (cc.SDL_PollEvent(&event) != 0) {
             switch (event.@"type") {
@@ -1061,25 +1103,39 @@ pub fn main() !u8 {
                             running = false;
                         },
                         cc.SDLK_d => {
-                            mouse.draw_mode = !mouse.draw_mode;
+                            mouse.loop_draw_mode = .loop;
+                        },
+                        cc.SDLK_v => {
+                            mouse.loop_draw_mode = .view;
+                        },
+                        cc.SDLK_r => {
+                            mouse.loop_draw_mode = .rect;
+                        },
+                        cc.SDLK_x => {
+                            // mouse.loop_draw_mode = .rect;
+                            if (mouse.mousedown){
+                                const x = mouse.mouse_location.?[0];
+                                const y = mouse.mouse_location.?[1];
+                                print("loc: {d}, {d} \t d_output.img: {d} \n",.{x,y,d_output.get(x,y).*});
+                            }
                         },
                         cc.SDLK_RIGHT => {
                             view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.right);
-                            window.needs_update = true;
+                            windy.needs_update = true;
                         },
                         cc.SDLK_LEFT => {
                             view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.left);
-                            window.needs_update = true;
+                            windy.needs_update = true;
                             // print("view_angle {}\n", .{view_angle});
                         },
                         cc.SDLK_UP => {
                             view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.up);
-                            window.needs_update = true;
+                            windy.needs_update = true;
                             // print("view_angle {}\n", .{view_angle});
                         },
                         cc.SDLK_DOWN => {
                             view.view_matrix = matMulNNRowFirst(3, f32, view.view_matrix, delta.down);
-                            window.needs_update = true;
+                            windy.needs_update = true;
                             // print("view_angle {}\n", .{view_angle});
                         },
                         else => {},
@@ -1091,6 +1147,7 @@ pub fn main() !u8 {
                     const px = @intCast(u31, event.button.x);
                     const py = @intCast(u31, event.button.y);
                     mouse.mouse_location = .{ px, py };
+
                     loops.temp_screen_loop_len = 0;
                     // loops.screen_loop.clearRetainingCapacity();
                 },
@@ -1098,7 +1155,7 @@ pub fn main() !u8 {
                     mouse.mousedown = false;
                     mouse.mouse_location = null;
 
-                    if (mouse.draw_mode == false) break :blk;
+                    if (mouse.loop_draw_mode == .view) break :blk;
 
                     if (loops.temp_screen_loop_len < 3) break :blk;
 
@@ -1122,27 +1179,31 @@ pub fn main() !u8 {
                     mouse.mouse_location.?[0] = px;
                     mouse.mouse_location.?[1] = py;
 
-                    if (mouse.draw_mode) {
-                        im.drawLine2(window.pix, nx, x_old, y_old, px, py, colors.white);
-                        try window.update();
-                        // loops.screen_loop.appendAssumeCapacity(.{ px, py });
-                        loops.temp_screen_loop[loops.temp_screen_loop_len] = .{ px, py };
-                        loops.temp_screen_loop_len += 1;
-                    } else {
-                        mouseMoveCamera(px, py, x_old, y_old, &view);
-                        window.needs_update = true;
+                    switch (mouse.loop_draw_mode) {
+                        .loop => {
+                            im.drawLine2(windy.pix, nx, x_old, y_old, px, py, colors.white);
+                            try windy.update();
+                            // loops.screen_loop.appendAssumeCapacity(.{ px, py });
+                            loops.temp_screen_loop[loops.temp_screen_loop_len] = .{ px, py };
+                            loops.temp_screen_loop_len += 1;
+                        },
+                        .view => {
+                            mouseMoveCamera(px, py, x_old, y_old, &view);
+                            windy.needs_update = true;
+                        },
+                        else => {},
                     }
                 },
                 else => {},
             }
         }
 
-        if (window.needs_update == false) {
+        if (windy.needs_update == false) {
             cc.SDL_Delay(16);
             continue;
         }
 
-        window.update_count += 1;
+        windy.update_count += 1;
 
         // perform the render and update the window
         args = .{ img_cl, d_output.img, d_zbuffer.img, colormap, nx, ny, mima, view, volume_dims };
@@ -1152,9 +1213,9 @@ pub fn main() !u8 {
         addBBox(d_output, view);
         drawLoops(d_output, view);
 
-        window.setPixels(d_output.img);
-        try window.update();
-        window.needs_update = false;
+        windy.setPixels(d_output.img);
+        try windy.update();
+        windy.needs_update = false;
 
         // Save max projection result
         // const filename = try std.fmt.bufPrint(&imgnamebuffer, "output/t100_rendered_{d:0>3}.tga", .{update_count});
@@ -1615,19 +1676,22 @@ test "test TIFF vs raw speed" {
     var al = gpa.allocator();
     const testtifname = "/Users/broaddus/Desktop/mpi-remote/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01/t100.tif";
 
-    t1 = std.time.milliTimestamp();
+    var t1: i64 = undefined;
+    var t2: i64 = undefined;
+
+    t1 = milliTimestamp();
     const img = try readTIFF3D(al, testtifname);
-    t2 = std.time.milliTimestamp();
+    t2 = milliTimestamp();
     print("readTIFF3D {d} ms \n", .{t2 - t1});
 
-    t1 = std.time.milliTimestamp();
+    t1 = milliTimestamp();
     try img.save("raw.img");
-    t2 = std.time.milliTimestamp();
+    t2 = milliTimestamp();
     print("save img {d} ms \n", .{t2 - t1});
 
-    t1 = std.time.milliTimestamp();
+    t1 = milliTimestamp();
     const img2 = try Img3D(f32).load("raw.img");
-    t2 = std.time.milliTimestamp();
+    t2 = milliTimestamp();
     print("load raw {d} ms \n", .{t2 - t1});
 
     try expect(eql(f32, img.img, img2.img));
@@ -1637,14 +1701,14 @@ test "test TIFF vs raw speed" {
     const img3 = try Img3D(f16).init(img.nx, img.ny, img.nz);
     for (img3.img) |*v, i| v.* = @floatCast(f16, img.img[i]);
 
-    t1 = std.time.milliTimestamp();
+    t1 = milliTimestamp();
     try img3.save("raw.img");
-    t2 = std.time.milliTimestamp();
+    t2 = milliTimestamp();
     print("save img f16 {d} ms \n", .{t2 - t1});
 
-    t1 = std.time.milliTimestamp();
+    t1 = milliTimestamp();
     _ = try Img3D(f16).load("raw.img");
-    t2 = std.time.milliTimestamp();
+    t2 = milliTimestamp();
     print("load raw f16 {d} ms \n", .{t2 - t1});
 }
 
