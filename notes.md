@@ -120,7 +120,7 @@ Reading from TIFF is slower than reading from RAW using `Img3D.load()`.
 
 It may actually be faster to load using the RGBA tiff interface than the `TIFFRasterScanlineSize64` interface!? confirm and explain this.
 
-# Hierarchy
+# Model Hierarchy
 
 App.mouse : Mouse
 App.window_main : Window
@@ -175,10 +175,26 @@ together even if our lines cross!
 We can use pixelToRay() to get the ray to cast into the volume, but then how far do we go?
 go until each ray hits the z from zbuffer.
 
+--- 
 
-# Max projection mode
+We could provide a more precise option for 3D drawing, where you first draw in max-proj view, 
+but then are presented with a side view (orthogonal?) to control the depth by tracing with your pencil.
 
-easy 3D bounding box creation and extension in depth
+The surface is defined by the intersection of the two sheets defined by the two view's Rays. 
+Of course there may be multiple intersection points... We have to disambiguate them somehow.
+
+# Easy 3D bounding box creation and extension in depth
+
+- a collection of rectangles / bboxes
+- rendering during drawing and during rotation
+- move existing rectangles
+- live view updating in 2nd window
+- Q: are they 2d or 3d ? 
+      - 3D required for volume rendering in 2nd window / 3D bbox annotations
+      - can infer 3D bbox from 2D using heuristics
+
+
+
 
 # Mouse controls | View
 
@@ -204,13 +220,6 @@ r_y =         -sin(theta) * sin(phi),  cos(phi),   cos(theta) * sin(phi)
 r_z =         -sin(theta) * cos(phi), -sin(phi),   cos(theta) * cos(phi) 
 ```
 
-
-# Let's rethink how we describe kernel parameters
-
-Parameters may be read or write (rw), they may be written once or repeatedly (1!)...
-they may describe buffers that require special buffer commands, or non-buffer args (bn).
-
-
 # Tracking Mode
 
 - [ ] allow object to occlude tracking tails
@@ -218,21 +227,29 @@ they may describe buffers that require special buffer commands, or non-buffer ar
 - [ ] extend tracks by dragging mouse with right hand and tapping "space" with left to advance time point.
       - [ ] use same workflow for moving bounding boxes through time.
 
+
+# OpenCL : Let's rethink how we describe kernel parameters
+
+Parameters may be read or write (rw), they may be written once or repeatedly (1!)...
+they may describe buffers that require special buffer commands, or non-buffer args (bn).
+
+
 # Features
+
 
 - [x] two rotation angles
 - [x] box around border
-- [ ] clicking with fw/bw 3D map 
-- [ ] dragging with cursor
+- [x] dragging with cursor
+- [x] drawing with fw/bw 3D map 
+- [x] proper window size. has a max width, but otherwise is h/w proportional to x,y image size. anisotropy interpreted from image.
+- [ ] save anno to disk
+- [ ] live load of new data from disk / mem
 - [ ] REPL interface with autocomplete to adjust params. access nested, internal structs. interactive.
 - [ ] colors: smoother color pallete...
 - [ ] semantic labels for objects, object selection and manipulation, colors based on object label.
 - [ ] add text labels pointing to objects that follow them over time and during view manipulation, rotation, etc.
-- [x] proper window size. has a max width, but otherwise is h/w proportional to x,y image size. anisotropy interpreted from image.
 - [ ] Loops and BoundingBox are always drawn on top of image... Should they be ? No, this is why we started this project in the first place.
 - [ ] Dynamically adjust the quality of depth rendering while view is updating. (lower density sampling in X,Y,and Z) Still shots get higher quality?
-
-
 
 # Bugs
 
