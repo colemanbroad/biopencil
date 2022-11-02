@@ -410,7 +410,7 @@ pub fn Kernel(
                 }
             }
 
-            return .{
+            return Self{
                 .kernel = kernel,
                 .buffers = buffers,
             };
@@ -451,7 +451,6 @@ pub fn Kernel(
                         // try testForCLError(errCode);
                         errCode = cl.clSetKernelArg(self.kernel, i, size, &arg);
                         try testForCLError(errCode);
-
                     },
                     else => {},
                 }
@@ -796,9 +795,9 @@ const loops = struct {
 };
 
 const rects = struct {
-    var temp_screen_rect: [2]U2 = undefined;
-    var all_volume_rect_mem: [100][3]U2 = undefined;
-    var all_volume_rect_count: usize = 0;
+    // var temp_screen_rect: [2]U2 = undefined;
+    var all_volume_pixel_aligned_bboxes: [100][3]U2 = undefined;
+    var all_volume_pixel_aligned_bbox_count: usize = 0;
 };
 
 // const anno = struct {
@@ -809,11 +808,11 @@ const rects = struct {
 //     pub fn drawRects()
 // }
 
-const Screen = struct {
-    surface: *cc.SDL_Surface,
-    needs_update: bool,
-    update_count: u64,
-};
+// const Screen = struct {
+//     surface: *cc.SDL_Surface,
+//     needs_update: bool,
+//     update_count: u64,
+// };
 
 // var mouse_mode =
 // TODO: Use mouse modes to dispatch early to loop, rect, view mouse functions.
@@ -953,12 +952,12 @@ pub fn main() !u8 {
     var t1: i64 = undefined;
     var t2: i64 = undefined;
 
-
     const filename = blk: {
         const testtifname = "/Users/broaddus/Desktop/mpi-remote/project-broaddus/rawdata/celegans_isbi/Fluo-N3DH-CE/01/t100.tif";
         var arg_it = try std.process.argsWithAllocator(temp);
         _ = arg_it.skip(); // skip exe name
-        break :blk arg_it.next() orelse testtifname;
+        break :blk arg_it.next() orelse testtifname; // zig10.x version
+        // break :blk try (arg_it.next(temp) orelse testtifname); // zig0.9.x version
     };
 
     // Load TIFF image
@@ -1000,7 +999,7 @@ pub fn main() !u8 {
 
     // t1 = milliTimestamp();
     const mima = im.minmax(f32, grey.img);
-    print("mima = {d}\n",.{mima});
+    print("mima = {d}\n", .{mima});
     // t2 = milliTimestamp();
     print("find min/max of f32 img [{}ms]\n", .{t2 - t1});
 
@@ -1056,19 +1055,19 @@ pub fn main() !u8 {
     try kernel.executeKernel(dcqp, args, &.{ nx, ny });
     // t2 = milliTimestamp();
     print("exec kernel [{}ms]\n", .{t2 - t1});
-    
+
     const mima2 = blk: {
-        var mn = [4]u8{0,0,0,0};
-        var mx = [4]u8{0,0,0,0};
+        var mn = [4]u8{ 0, 0, 0, 0 };
+        var mx = [4]u8{ 0, 0, 0, 0 };
         for (d_output.img) |v| {
-            for (v) |vi,i| {
+            for (v) |vi, i| {
                 mn[i] = std.math.min(mn[i], vi);
                 mx[i] = std.math.max(mx[i], vi);
             }
         }
-        break :blk .{.mn=mn,.mx=mx};
+        break :blk .{ .mn = mn, .mx = mx };
     };
-    print("mima of d_output.img {any}\n",.{mima2});
+    print("mima of d_output.img {any}\n", .{mima2});
 
     // Update window
     addBBox(d_output, view);
@@ -1302,8 +1301,8 @@ fn u22V2(x: U2) V2 {
 
 /// define small rotations: right,left,up,down
 const delta = struct {
-    const c = @cos(2 * std.math.pi / 32.0);
-    const s = @sin(2 * std.math.pi / 32.0);
+    const c = @cos(@as(f32, 2.0) * std.math.pi / 32.0);
+    const s = @sin(@as(f32, 2.0) * std.math.pi / 32.0);
 
     // rotate z to right, x into screen.
     pub const right: [9]f32 = .{

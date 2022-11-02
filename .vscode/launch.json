@@ -8,7 +8,7 @@
             "name": "(lldb) Launch",
             "type": "cppdbg",
             "request": "launch",
-            "program": "./zig-out/bin/clbridge",
+            "program": "zig-out/bin/clbridge",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
