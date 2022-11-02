@@ -244,8 +244,12 @@ __kernel void max_project_float(
   // if (tnear < 0.0f) tnear = 0.0f;
   // const int reducedSteps = maxSteps; // /numParts
   // const int maxSteps = int(fabs(tfar-tnear)/dt); // assume dt = 1;
-  const int maxSteps = 100; //15;
-  const float dt = 2 * fabs(tfar-tnear)/maxSteps; //((reducedSteps/LOOPUNROLL)*LOOPUNROLL);
+  const int maxSteps = 30; //15;
+  
+  /// tfar and tnear are scalar multipliers that solve
+  /// r.orig + tnear * r.direc = near_intersection_pt
+  /// r.orig + tfar * r.direc = far_intersection_pt
+  const float dt = fabs(tfar-tnear)/maxSteps; //((reducedSteps/LOOPUNROLL)*LOOPUNROLL);
   // const float dt = 1 / 35.0;
   // const float dt = 1.0 / dot(r.direc, convert_float3(volume_dims)) * 4.0;
   // const float dt = 0.1; // dot(r.direc, view.anisotropy);
@@ -254,25 +258,24 @@ __kernel void max_project_float(
   const float4 delta_pos = (float4){dt*r.direc/2, 0};
   float4 pos = (float4){(r.orig+tnear*r.direc)/2 + (float3)(0.5), 0};
   float4 maxValPosition = pos;
-
-
   
-  if (x==300 && y==300) {
-    printview(view);
-    printf("RAY = \n");
-    printray(r);
-    printf("tnear %6.3f, tfar = %6.3f \n", tnear, tfar);
-    // printf("currentVal = %6.3f \n", );
-    printf("The INITIAL pos = %6.3v4fhl \n", pos);
-    printf("delta_pos = %6.3v4fhl \n", delta_pos);
-    printf("dt = %6.3f \n", dt);
-  }
+  // if (x==300 && y==300) {
+  //   printview(view);
+  //   printf("RAY = \n");
+  //   printray(r);
+  //   printf("tnear %6.3f, tfar = %6.3f \n", tnear, tfar);
+  //   // printf("currentVal = %6.3f \n", );
+  //   printf("The INITIAL pos = %6.3f %6.3f %6.3f %6.3f \n", pos.x , pos.y, pos.z, pos.w);
+  //   printf("delta_pos = %6.3f %6.3f %6.3f %6.3f \n", delta_pos.x, delta_pos.y, delta_pos.z, delta_pos.w);
+  //   printf("dt = %6.3f \n", dt);
+  // }
 
   // initial values for output
   float maxVal = 0;
   int maxValDepth = 0;
 
   float alpha_pow = 0.1;
+
 
   // Perform the max projection
   if (alpha_pow==0) {
@@ -302,10 +305,12 @@ __kernel void max_project_float(
 
         currentVal = read_imagef(volume, volumeSampler, pos).x;
 
-        if (x==300 && y==300) {
+        if (max(pos.x, max(pos.y,pos.z))>1.001) {
           printf("currentVal = %6.3f \n", currentVal);
-          printf("pos = %6.3v4fhl \n", pos);
+          printf("pos = %6.3f %6.3f %6.3f %6.3f \n", pos.x , pos.y, pos.z, pos.w);
         }
+        // if (x==300 && y==300) {
+        // }
         // currentVal = (maxVal == 0)?currentVal:(currentVal-clipLow)/(clipHigh-clipLow);
         maxValDepth = (cumsum * currentVal > maxVal) ? i : maxValDepth;
         maxValPosition = (currentVal > maxVal) ? pos : maxValPosition;
