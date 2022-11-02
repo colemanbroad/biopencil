@@ -814,13 +814,20 @@ const rects = struct {
 //     update_count: u64,
 // };
 
-// var mouse_mode =
-// TODO: Use mouse modes to dispatch early to loop, rect, view mouse functions.
-// Let the mode determine how to handle key and mouse input.
-const Mouse = struct {
-    mousedown: bool,
-    mouse_location: ?[2]u31,
-    loop_draw_mode: enum { view, loop, rect },
+// TODO: Let the mode determine how to handle key and mouse input.
+
+// const Knowable = enum { true, false, unknown };
+
+// const app_mouse = struct {
+//     var mousedown: bool = false;
+//     var mouse_location: ?[2]u31 = null; // from top left of Window
+//     // var mouse_in_window: enum { true, false, unknown } = .unknown;
+// };
+
+const app = struct {
+    var running = true;
+    const ViewMode = enum { view, loop, rect };
+    var loop_draw_mode: ViewMode = .view;
 };
 
 // for timings
@@ -1077,45 +1084,48 @@ pub fn main() !u8 {
 
     // done with startup . time to run the app
 
-    var running = true;
+    // var running = true;
 
-    var mouse = Mouse{
+    const Mouse = struct {
+        mousedown: bool,
+        mouse_location: ?[2]u31,
+    };
+
+    var app_mouse = Mouse{
         .mousedown = false,
-        // .mousePixbuffer = try temp.alloc([2]c_int, 10),
         .mouse_location = null,
-        .loop_draw_mode = .view,
     };
 
     // var boxpts:[8]Vec2 = undefined;
     // var imgnamebuffer:[100]u8 = undefined;
 
-    while (running) {
+    while (app.running) {
         var event: cc.SDL_Event = undefined;
         while (cc.SDL_PollEvent(&event) != 0) {
             switch (event.@"type") {
                 cc.SDL_QUIT => {
-                    running = false;
+                    app.running = false;
                 },
                 cc.SDL_KEYDOWN => {
                     switch (event.key.keysym.sym) {
                         cc.SDLK_q => {
-                            running = false;
+                            app.running = false;
                         },
                         cc.SDLK_d => {
-                            mouse.loop_draw_mode = .loop;
+                            app.loop_draw_mode = .loop;
                         },
                         cc.SDLK_v => {
-                            mouse.loop_draw_mode = .view;
+                            app.loop_draw_mode = .view;
                         },
                         cc.SDLK_r => {
-                            mouse.loop_draw_mode = .rect;
+                            app.loop_draw_mode = .rect;
                         },
                         cc.SDLK_x => {
-                            // mouse.loop_draw_mode = .rect;
-                            if (mouse.mousedown){
-                                const x = mouse.mouse_location.?[0];
-                                const y = mouse.mouse_location.?[1];
-                                print("loc: {d}, {d} \t d_output.img: {d} \n",.{x,y,d_output.get(x,y).*});
+                            // app.loop_draw_mode = .rect;
+                            if (app_mouse.mousedown) {
+                                const x = app_mouse.mouse_location.?[0];
+                                const y = app_mouse.mouse_location.?[1];
+                                print("loc: {d}, {d} \t d_output.img: {d} \n", .{ x, y, d_output.get(x, y).* });
                             }
                         },
                         cc.SDLK_RIGHT => {
@@ -1141,20 +1151,20 @@ pub fn main() !u8 {
                     }
                 },
                 cc.SDL_MOUSEBUTTONDOWN => {
-                    mouse.mousedown = true;
+                    app_mouse.mousedown = true;
                     // TODO: reset .loopInProgress
                     const px = @intCast(u31, event.button.x);
                     const py = @intCast(u31, event.button.y);
-                    mouse.mouse_location = .{ px, py };
+                    app_mouse.mouse_location = .{ px, py };
 
                     loops.temp_screen_loop_len = 0;
                     // loops.screen_loop.clearRetainingCapacity();
                 },
                 cc.SDL_MOUSEBUTTONUP => blk: {
-                    mouse.mousedown = false;
-                    mouse.mouse_location = null;
+                    app_mouse.mousedown = false;
+                    app_mouse.mouse_location = null;
 
-                    if (mouse.loop_draw_mode == .view) break :blk;
+                    if (app.loop_draw_mode == .view) break :blk;
 
                     if (loops.temp_screen_loop_len < 3) break :blk;
 
@@ -1162,7 +1172,7 @@ pub fn main() !u8 {
                     print("The number of total objects is {} \n", .{loops.volume_loop_max_index});
                 },
                 cc.SDL_MOUSEMOTION => blk: {
-                    if (mouse.mousedown == false) break :blk;
+                    if (app_mouse.mousedown == false) break :blk;
 
                     const px = @intCast(u31, event.motion.x);
                     const py = @intCast(u31, event.motion.y);
@@ -1173,12 +1183,12 @@ pub fn main() !u8 {
                     //     break :blk;
                     // }
 
-                    const x_old = mouse.mouse_location.?[0];
-                    const y_old = mouse.mouse_location.?[1];
-                    mouse.mouse_location.?[0] = px;
-                    mouse.mouse_location.?[1] = py;
+                    const x_old = app_mouse.mouse_location.?[0];
+                    const y_old = app_mouse.mouse_location.?[1];
+                    app_mouse.mouse_location.?[0] = px;
+                    app_mouse.mouse_location.?[1] = py;
 
-                    switch (mouse.loop_draw_mode) {
+                    switch (app.loop_draw_mode) {
                         .loop => {
                             im.drawLine2(windy.pix, nx, x_old, y_old, px, py, colors.white);
                             try windy.update();
