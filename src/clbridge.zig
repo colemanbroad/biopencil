@@ -796,17 +796,13 @@ const loops = struct {
 
 const rects = struct {
     // var temp_screen_rect: [2]U2 = undefined;
-    var all_volume_pixel_aligned_bboxes: [100][3]U2 = undefined;
-    var all_volume_pixel_aligned_bbox_count: usize = 0;
-};
+    var volume_pixel_aligned_bboxes: [100][3]U2 = undefined;
+    var volume_pixel_aligned_bbox_count: usize = 0;
 
-// const anno = struct {
-//     // ArrayList ? can add and set
-//     const loops = ...
-//     const rects = ...
-//     pub fn drawLoops()
-//     pub fn drawRects()
-// }
+    fn onMouseDown() void {}
+    fn onMouseUp() void {}
+    fn onMouseMove() void {}
+};
 
 // const Screen = struct {
 //     surface: *cc.SDL_Surface,
@@ -829,10 +825,6 @@ const app = struct {
     const ViewMode = enum { view, loop, rect };
     var loop_draw_mode: ViewMode = .view;
 };
-
-// for timings
-// var t1: i64 = 0;
-// var t2: i64 = 0;
 
 test "test window creation" {
     const win = try Window.init(1000, 800);
@@ -1084,8 +1076,7 @@ pub fn main() !u8 {
 
     // done with startup . time to run the app
 
-    // var running = true;
-
+    // WARNING: can't move this to global scope or zig10_4060 breaks!
     const Mouse = struct {
         mousedown: bool,
         mouse_location: ?[2]u31,
