@@ -9,8 +9,8 @@ pub fn build(b: *Builder) void {
     {
         const exe = b.addExecutable("clbridge", "src/clbridge.zig");
         exe.setBuildMode(mode);
-        exe.addIncludePath("/usr/local/include/"); // tiff.h
-        exe.addIncludePath("libs/include/"); // CL/opencl.h
+        exe.addIncludeDir("/usr/local/include/"); // tiff.h
+        exe.addIncludeDir("libs/include/"); // CL/opencl.h
 
         exe.linkFramework("OpenCL");
         exe.linkSystemLibrary("tiff");
@@ -22,8 +22,8 @@ pub fn build(b: *Builder) void {
         const exe = b.addTestExe("clbridge-test", "src/clbridge.zig");
 
         // exe.addLibraryPath("/usr/local/lib"); (automatically linked in ???)
-        exe.addIncludePath("/usr/local/include/"); // tiff.h (required)
-        exe.addIncludePath("libs/include/"); // CL/opencl.h
+        exe.addIncludeDir("/usr/local/include/"); // tiff.h (required)
+        exe.addIncludeDir("libs/include/"); // CL/opencl.h
 
         exe.linkFramework("OpenCL");
         exe.linkSystemLibrary("tiff");
@@ -34,5 +34,4 @@ pub fn build(b: *Builder) void {
 
         exe.install();
     }
-
 }
