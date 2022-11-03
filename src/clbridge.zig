@@ -712,7 +712,7 @@ fn volumeLoop2ScreenLoop(view: View, vl: VolumeLoop) ScreenLoop {
 ///  since our data is noisy, we can't always expect that the maxval of the intensity is from
 ///  the object we intend. we could deal with this by _denoising_ the loop depth, the image depth buffer,
 ///
-fn embedLoops(al: std.mem.Allocator, loop: ScreenLoop, view: View, depth_buffer: Img2D(f32)) !void {
+fn embedLoopAndSave(loop: ScreenLoop, view: View, depth_buffer: Img2D(f32)) !void {
 
     // NOTE: we're looping over pixel knots in our Loop, but this does not include pixels drawn interpolated between knot points.
     var depth_mean = @as(f32, 0);
@@ -722,8 +722,9 @@ fn embedLoops(al: std.mem.Allocator, loop: ScreenLoop, view: View, depth_buffer:
     }
     depth_mean /= @intToFloat(f32, loop.len);
 
-    var filtered_positions = try al.alloc([3]f32, 900);
-    defer al.free(filtered_positions);
+    // var filtered_positions = try al.alloc([3]f32, 900);
+    var filtered_positions: [900][3]f32 = undefined;
+    // defer al.free(filtered_positions);
     var vertex_count: u16 = 0;
 
     for (loop) |v| {
@@ -796,6 +797,7 @@ const loops = struct {
 
 const rects = struct {
     // var temp_screen_rect: [2]U2 = undefined;
+    var rect_being_drawn: ?[2]U2 = null;
     var volume_pixel_aligned_bboxes: [100][3]U2 = undefined;
     var volume_pixel_aligned_bbox_count: usize = 0;
 
@@ -1159,7 +1161,7 @@ pub fn main() !u8 {
 
                     if (loops.temp_screen_loop_len < 3) break :blk;
 
-                    try embedLoops(gpa.allocator(), loops.temp_screen_loop[0..loops.temp_screen_loop_len], view, d_zbuffer);
+                    try embedLoopAndSave(loops.temp_screen_loop[0..loops.temp_screen_loop_len], view, d_zbuffer);
                     print("The number of total objects is {} \n", .{loops.volume_loop_max_index});
                 },
                 cc.SDL_MOUSEMOTION => blk: {
