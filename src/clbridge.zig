@@ -1152,7 +1152,7 @@ pub fn main() !u8 {
                     const py = @intCast(u31, event.button.y);
                     app_mouse.mouse_location = .{ px, py };
 
-                    rects.rect_being_drawn_vertex0 = .{px,py};
+                    // rects.rect_being_drawn_vertex0 = [2]u31{px,py};
 
                     // if (app.loop_draw_mode==.rect) {
                     // }
