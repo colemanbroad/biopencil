@@ -799,7 +799,7 @@ const loops = struct {
 
 const rects = struct {
     // var temp_screen_rect: [2]U2 = undefined;
-    var rect_being_drawn_vertex0: [2]u31 = .{0,0};
+    // var rect_being_drawn_vertex0: [2]u31 = .{0,0};
     var volume_pixel_aligned_bboxes: [100][3]U2 = undefined;
     var volume_pixel_aligned_bbox_count: usize = 0;
 
@@ -1091,8 +1091,12 @@ pub fn main() !u8 {
         .mouse_location = null,
     };
 
+    var rect_being_drawn_vertex0: [2]u31 = .{0,0};
+    
     // var boxpts:[8]Vec2 = undefined;
     // var imgnamebuffer:[100]u8 = undefined;
+
+
 
     while (app.running) {
         var event: cc.SDL_Event = undefined;
@@ -1152,7 +1156,7 @@ pub fn main() !u8 {
                     const py = @intCast(u31, event.button.y);
                     app_mouse.mouse_location = .{ px, py };
 
-                    // rects.rect_being_drawn_vertex0 = [2]u31{px,py};
+                    rect_being_drawn_vertex0 = [2]u31{px,py};
 
                     // if (app.loop_draw_mode==.rect) {
                     // }
@@ -1197,7 +1201,7 @@ pub fn main() !u8 {
                         },
                         .rect => {
                             // if (rects.rect_being_drawn_vertex0) |v0| {
-                            const v0 = rects.rect_being_drawn_vertex0;
+                            const v0 = rect_being_drawn_vertex0;
                             // const v0 = [2]u31{100,100};
                             const x0 = v0[0];
                             const y0 = v0[1];
