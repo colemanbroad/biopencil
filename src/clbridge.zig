@@ -744,8 +744,10 @@ fn embedLoopAndSave(loop: ScreenLoop, view: View, depth_buffer: Img2D(f32)) !voi
 }
 
 const colors = struct {
-    const white = [4]u8{ 255, 255, 255, 255 };
-    const red = [4]u8{ 255, 0, 0, 255 };
+    const white  = [4]u8{ 255, 255, 255, 255 };
+    const red    = [4]u8{ 0, 0, 255, 255 };
+    // const yellow = [4]u8{ 0, 255, 0, 255 };
+    // const blue   = [4]u8{ 255, 0, 0, 255 };
 };
 
 fn drawLoops(d_output: Img2D([4]u8), view: View) void {
@@ -797,7 +799,7 @@ const loops = struct {
 
 const rects = struct {
     // var temp_screen_rect: [2]U2 = undefined;
-    var rect_being_drawn: ?[2]U2 = null;
+    var rect_being_drawn_vertex0: [2]u31 = .{0,0};
     var volume_pixel_aligned_bboxes: [100][3]U2 = undefined;
     var volume_pixel_aligned_bbox_count: usize = 0;
 
@@ -1150,6 +1152,11 @@ pub fn main() !u8 {
                     const py = @intCast(u31, event.button.y);
                     app_mouse.mouse_location = .{ px, py };
 
+                    // rects.rect_being_drawn_vertex0 = [2]u31{px,py};
+
+                    // if (app.loop_draw_mode==.rect) {
+                    // }
+
                     loops.temp_screen_loop_len = 0;
                     // loops.screen_loop.clearRetainingCapacity();
                 },
@@ -1171,7 +1178,7 @@ pub fn main() !u8 {
                     const py = @intCast(u31, event.motion.y);
 
                     // should never be null, we've already asserted `mousedown`
-                    // if (mouse.mouse_location == null) {
+                    assert(app_mouse.mouse_location != null);
                     //     mouse.mouse_location = .{ px, py };
                     //     break :blk;
                     // }
@@ -1185,15 +1192,29 @@ pub fn main() !u8 {
                         .loop => {
                             im.drawLine2(windy.pix, nx, x_old, y_old, px, py, colors.white);
                             try windy.update();
-                            // loops.screen_loop.appendAssumeCapacity(.{ px, py });
                             loops.temp_screen_loop[loops.temp_screen_loop_len] = .{ px, py };
                             loops.temp_screen_loop_len += 1;
+                        },
+                        .rect => {
+                            // if (rects.rect_being_drawn_vertex0) |v0| {
+                            const v0 = rects.rect_being_drawn_vertex0;
+                            // const v0 = [2]u31{100,100};
+                            const x0 = v0[0];
+                            const y0 = v0[1];
+                            // TODO: need to BLIT old / new
+                            im.drawLine2(windy.pix, nx, x0, y0, px, y0, colors.red);
+                            im.drawLine2(windy.pix, nx, x0, y0, x0, py, colors.red);
+                            im.drawLine2(windy.pix, nx, px, py, px, y0, colors.red);
+                            im.drawLine2(windy.pix, nx, px, py, x0, py, colors.red);
+                            try windy.update();
+                            // }
+                            // const x0 = @intCast(u31, rects.rect_being_drawn_vertex0.?[0]);
+                            // const y0 = @intCast(u31, rects.rect_being_drawn_vertex0.?[1]);
                         },
                         .view => {
                             mouseMoveCamera(px, py, x_old, y_old, &view);
                             windy.needs_update = true;
                         },
-                        else => {},
                     }
                 },
                 else => {},
