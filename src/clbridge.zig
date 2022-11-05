@@ -744,8 +744,8 @@ fn embedLoopAndSave(loop: ScreenLoop, view: View, depth_buffer: Img2D(f32)) !voi
 }
 
 const colors = struct {
-    const white  = [4]u8{ 255, 255, 255, 255 };
-    const red    = [4]u8{ 0, 0, 255, 255 };
+    const white = [4]u8{ 255, 255, 255, 255 };
+    const red = [4]u8{ 0, 0, 255, 255 };
     // const yellow = [4]u8{ 0, 255, 0, 255 };
     // const blue   = [4]u8{ 255, 0, 0, 255 };
 };
@@ -934,9 +934,6 @@ const Window = struct {
 
 // };
 
-// const myCL = struct {
-// }
-
 ///
 ///  Load and Render TIFF with OpenCL and SDL.
 ///
@@ -1091,12 +1088,10 @@ pub fn main() !u8 {
         .mouse_location = null,
     };
 
-    var rect_being_drawn_vertex0: [2]u31 = .{0,0};
-    
+    var rect_being_drawn_vertex0: [2]u31 = undefined; // this is
+
     // var boxpts:[8]Vec2 = undefined;
     // var imgnamebuffer:[100]u8 = undefined;
-
-
 
     while (app.running) {
         var event: cc.SDL_Event = undefined;
@@ -1156,13 +1151,9 @@ pub fn main() !u8 {
                     const py = @intCast(u31, event.button.y);
                     app_mouse.mouse_location = .{ px, py };
 
-                    rect_being_drawn_vertex0 = [2]u31{px,py};
-
-                    // if (app.loop_draw_mode==.rect) {
-                    // }
+                    rect_being_drawn_vertex0 = [2]u31{ px, py };
 
                     loops.temp_screen_loop_len = 0;
-                    // loops.screen_loop.clearRetainingCapacity();
                 },
                 cc.SDL_MOUSEBUTTONUP => blk: {
                     app_mouse.mousedown = false;
@@ -1183,12 +1174,12 @@ pub fn main() !u8 {
 
                     // should never be null, we've already asserted `mousedown`
                     assert(app_mouse.mouse_location != null);
-                    //     mouse.mouse_location = .{ px, py };
-                    //     break :blk;
-                    // }
 
                     const x_old = app_mouse.mouse_location.?[0];
                     const y_old = app_mouse.mouse_location.?[1];
+
+                    // if (euclideanSquared(px, py, x_old, y_old) < 5) break :blk;
+
                     app_mouse.mouse_location.?[0] = px;
                     app_mouse.mouse_location.?[1] = py;
 
@@ -1200,20 +1191,15 @@ pub fn main() !u8 {
                             loops.temp_screen_loop_len += 1;
                         },
                         .rect => {
-                            // if (rects.rect_being_drawn_vertex0) |v0| {
-                            const v0 = rect_being_drawn_vertex0;
-                            // const v0 = [2]u31{100,100};
-                            const x0 = v0[0];
-                            const y0 = v0[1];
-                            // TODO: need to BLIT old / new
+                            const x0 = rect_being_drawn_vertex0[0];
+                            const y0 = rect_being_drawn_vertex0[1];
+
+                            windy.setPixels(d_output.img); // bounding box already written to d_output.img!
                             im.drawLine2(windy.pix, nx, x0, y0, px, y0, colors.red);
                             im.drawLine2(windy.pix, nx, x0, y0, x0, py, colors.red);
                             im.drawLine2(windy.pix, nx, px, py, px, y0, colors.red);
                             im.drawLine2(windy.pix, nx, px, py, x0, py, colors.red);
                             try windy.update();
-                            // }
-                            // const x0 = @intCast(u31, rects.rect_being_drawn_vertex0.?[0]);
-                            // const y0 = @intCast(u31, rects.rect_being_drawn_vertex0.?[1]);
                         },
                         .view => {
                             mouseMoveCamera(px, py, x_old, y_old, &view);
@@ -1250,6 +1236,12 @@ pub fn main() !u8 {
     }
 
     return 0;
+}
+
+fn euclideanSquared(x0: i32, y0: i32, x1: i32, y1: i32) f32 {
+    const x = @intToFloat(f32, x0 - x1);
+    const y = @intToFloat(f32, y0 - y1);
+    return x * x + y * y;
 }
 
 /// generate "cool" colormap

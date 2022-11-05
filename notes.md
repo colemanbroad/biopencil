@@ -1,4 +1,30 @@
-# Tue Sep 27 10:29:35 2022
+Get rendered image to appear in a SDL window.
+
+- Commands
+- Wed Sep 28 00:29:14 2022
+- Tue Oct  4 16:54:47 2022
+- Wed Oct  5 15:16:13 2022
+- Thu Oct  6 14:56:58 2022
+- Mon Oct 17 12:40:49 EDT 2022
+- Thu Oct 20 13:28:27 EDT 2022
+- Sun Oct 23 12:37:26 EDT 2022
+- Performance
+- Loading data
+- Model Hierarchy
+- Architecture and control flow
+- Modal Editing
+- Drawing in 3D
+- Easy 3D bounding box creation and extension in depth
+- Mouse controls | View
+- Tracking Mode
+- OpenCL : Let's rethink how we describe kernel parameters
+- Features
+- Bugs
+- Zig Questions
+
+# Commands
+
+grep '^#' notes.md | sed 's/#/-/'  # Print a table of contents from `notes.md` 
 
 Get rendered image to appear in a SDL window.
 
@@ -155,6 +181,16 @@ perspective_projection.kernel.call(View)
 
 View must be global?
 
+
+# Architecture and control flow
+
+- why is updating loop.temp... allowed ?
+- can i edit namespaced vars from a method ? loops.method() ?
+- Model / View style or mixed view and control style?
+	- Model / View style requires that I have separate control flow (1) for updating my model(input) and (2) for updating my view(model).
+	- While the everything-together approach mixes view updates into the model update control flow...
+	- I'm going to try separating them and see what happens...
+	
 
 # Modal Editing
 
