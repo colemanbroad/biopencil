@@ -31,7 +31,7 @@ pub fn Img2D(comptime T: type) type {
             };
         }
 
-        pub inline fn get(this: This, x: u32, y: u32) *T {
+        pub inline fn get(this: This, x: usize, y: usize) *T {
             return &this.img[this.nx * y + x];
         }
 
@@ -76,7 +76,7 @@ pub fn Img3D(comptime T: type) type {
             al.free(this.img);
         }
 
-        pub inline fn get(this: This, x: u32, y: u32, z: u32) *T {
+        pub inline fn get(this: This, x: usize, y: usize, z: usize) *T {
             return &this.img[this.nx * this.ny * z + this.nx * y + x];
         }
 

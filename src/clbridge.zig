@@ -993,6 +993,14 @@ pub fn main() !u8 {
     t2 = milliTimestamp();
     print("initialize buffers [{}ms]\n", .{t2 - t1});
 
+    var windy_ortho = try Window.init(grey.nx, grey.ny);
+    {
+        const windy_ortho_projection = try maxProjectionOrtho(grey);
+        const windy_ortho_projection_rgba = try intensityToRGBA(windy_ortho_projection);
+        windy_ortho.setPixels(windy_ortho_projection_rgba.img);
+        try windy_ortho.update();
+    }
+
     var windy = try Window.init(nx, ny);
     // TODO: window deinit()
 
@@ -1235,6 +1243,29 @@ pub fn main() !u8 {
     }
 
     return 0;
+}
+
+fn intensityToRGBA(img: Img2D(f32)) !Img2D([4]u8) {
+    const mima = im.minmax(f32, img.img);
+    const res = try Img2D([4]u8).init(img.nx, img.ny);
+    for (img.img) |v, i| {
+        const v_rescaled = @floatToInt(u8, (v - mima[0]) / (mima[1] - mima[0]) * 255);
+        res.img[i] = [4]u8{ v_rescaled, v_rescaled, v_rescaled, 255 };
+    }
+    return res;
+}
+
+fn maxProjectionOrtho(img: Img3D(f32)) !Img2D(f32) {
+    const res = try Img2D(f32).init(img.nx, img.ny);
+    for (img.img) |v, i| {
+        const x = i % img.nx;
+        const y = @divFloor(i, img.nx) % img.ny; //
+        // const z = @divFloor(i, img.nx * img.ny) & img.nz; // mod nz shouldn't be necessary
+        const w_ptr = res.get(x, y);
+        // const val0
+        if (w_ptr.* < v) w_ptr.* = v;
+    }
+    return res;
 }
 
 fn euclideanSquared(x0: i32, y0: i32, x1: i32, y1: i32) f32 {
