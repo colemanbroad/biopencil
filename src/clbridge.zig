@@ -961,23 +961,22 @@ pub fn main() !u8 {
     };
 
     // Load TIFF image
-    // t1 = milliTimestamp();
+    t1 = milliTimestamp();
     const grey = try readTIFF3D(temp, filename);
-
-    // t2 = milliTimestamp();
+    t2 = milliTimestamp();
     print("load TIFF and convert to f32 [{}ms]\n", .{t2 - t1});
 
     // Setup SDL & open window
-    // t1 = milliTimestamp();
+    t1 = milliTimestamp();
     if (cc.SDL_Init(cc.SDL_INIT_VIDEO) != 0) {
         cc.SDL_Log("Unable to initialize SDL: %s", cc.SDL_GetError());
         return error.SDLInitializationFailed;
     }
     defer cc.SDL_Quit();
-    // t2 = milliTimestamp();
+    t2 = milliTimestamp();
     print("SDL_Init [{}ms]\n", .{t2 - t1});
 
-    // t1 = milliTimestamp();
+    t1 = milliTimestamp();
     // this assumes x will be the bounding length, but it could be either!
     var nx: u31 = undefined;
     var ny: u31 = undefined;
@@ -991,27 +990,27 @@ pub fn main() !u8 {
 
     var d_output = try Img2D([4]u8).init(nx, ny);
     var d_zbuffer = try Img2D(f32).init(nx, ny);
-    // t2 = milliTimestamp();
+    t2 = milliTimestamp();
     print("initialize buffers [{}ms]\n", .{t2 - t1});
 
     var windy = try Window.init(nx, ny);
     // TODO: window deinit()
 
-    // t1 = milliTimestamp();
+    t1 = milliTimestamp();
     const mima = im.minmax(f32, grey.img);
     print("mima = {d}\n", .{mima});
-    // t2 = milliTimestamp();
+    t2 = milliTimestamp();
     print("find min/max of f32 img [{}ms]\n", .{t2 - t1});
 
     // setup OpenCL Contex Queue
-    // t1 = milliTimestamp();
+    t1 = milliTimestamp();
     var dcqp = try DevCtxQueProg.init(temp, files);
     defer dcqp.deinit();
-    // t2 = milliTimestamp();
+    t2 = milliTimestamp();
     print("DevCtxQueProg.init [{}ms]\n", .{t2 - t1});
 
     // setup arguments for max-project Kernel
-    // t1 = milliTimestamp();
+    t1 = milliTimestamp();
     const colormap = cmapCool();
     var img_cl = try img2CLImg(grey, dcqp);
     var view = View{
@@ -1048,12 +1047,12 @@ pub fn main() !u8 {
 
     var kernel = try Kernel("max_project_float", argtypes).init(dcqp, args);
     defer kernel.deinit();
-    // t2 = milliTimestamp();
+    t2 = milliTimestamp();
     print("define kernel and args [{}ms]\n", .{t2 - t1});
 
-    // t1 = milliTimestamp();
+    t1 = milliTimestamp();
     try kernel.executeKernel(dcqp, args, &.{ nx, ny });
-    // t2 = milliTimestamp();
+    t2 = milliTimestamp();
     print("exec kernel [{}ms]\n", .{t2 - t1});
 
     const mima2 = blk: {

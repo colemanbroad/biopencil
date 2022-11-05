@@ -107,10 +107,11 @@ This also makes computing the projection easier as we make the volume smaller.
 
 Reading TIFF is slow. 95MB tiff file reads in 2s... Most of this must be decoding, because I can `dd` the file to `/dev/null/` at 4GB/s.
       UPDATE: 84MB tiff Tribolium reads in 1.3s. This is def too slow.
-OpenCL device & context creation is slow and highly variable. Between 60ms .. 450ms. Also I feel noticeable lag on my screen when working with most apps. This is a problem with my laptop's graphics hardware.
+OpenCL device & context creation is slow and highly variable. Between 60ms .. 450ms. Also I feel noticeable lag on my screen when working with most apps. This is a problem with my laptop's graphics hardware?
 
 Thu Oct 27 01:33:24 EDT 2022
-UPDATE: No idea why... but suddenly after the refactor into Window.init() we can suddenly open an SDL window in 15 ms.
+UPDATE: No idea why... but suddenly after the refactor into Window.init() we can open an SDL window in 15 ms.
+UPDATE: Now (Sat Nov 5) it's back to 900ms. Previous results may have been a timing mistake?
 
 We can profile our application with a simple sampling profiler!
 [mac profiling tips](https://gist.github.com/loderunner/36724cc9ee8db66db305)
@@ -124,7 +125,8 @@ We can profile our application with a simple sampling profiler!
 
 Thu Oct 27 12:02:50 EDT 2022
 Profiling reveals that reading from the volume sampler in OpenCL is ACTUALLY a hot spot. And 
-that calling kernels in general is slow.
+that calling kernels in general is slow. Also, our line-by-line timing is misleading, because the asynchronous execution of `executeKernel()` 
+makes it look like we spend all our time _reading out data_, when in fact it's executing kernels.
 
 # Loading data
 
