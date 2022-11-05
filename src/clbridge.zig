@@ -848,6 +848,9 @@ const Window = struct {
 
     needs_update: bool,
     update_count: u64,
+    windowID: u32,
+    nx: u32,
+    ny: u32,
 
     const This = @This();
 
@@ -887,6 +890,9 @@ const Window = struct {
             .pix = @ptrCast([*c][4]u8, surface.pixels.?),
             .needs_update = false,
             .update_count = 0,
+            .windowID = cc.SDL_GetWindowID(window),
+            .nx = nx,
+            .ny = ny,
         };
 
         res.pix[50] = .{ 255, 255, 255, 255 };
@@ -994,12 +1000,10 @@ pub fn main() !u8 {
     print("initialize buffers [{}ms]\n", .{t2 - t1});
 
     var windy_ortho = try Window.init(grey.nx, grey.ny);
-    {
-        const windy_ortho_projection = try maxProjectionOrtho(grey);
-        const windy_ortho_projection_rgba = try intensityToRGBA(windy_ortho_projection);
-        windy_ortho.setPixels(windy_ortho_projection_rgba.img);
-        try windy_ortho.update();
-    }
+    const windy_ortho_projection = try maxProjectionOrtho(grey);
+    const windy_ortho_projection_rgba = try intensityToRGBA(windy_ortho_projection);
+    windy_ortho.setPixels(windy_ortho_projection_rgba.img);
+    try windy_ortho.update();
 
     var windy = try Window.init(nx, ny);
     // TODO: window deinit()
@@ -1121,8 +1125,9 @@ pub fn main() !u8 {
                         cc.SDLK_r => {
                             app.loop_draw_mode = .rect;
                         },
-                        cc.SDLK_x => {
+                        cc.SDLK_x => blk: {
                             // app.loop_draw_mode = .rect;
+                            if (event.key.windowID != windy.windowID) break :blk;
                             if (app_mouse.mousedown) {
                                 const x = app_mouse.mouse_location.?[0];
                                 const y = app_mouse.mouse_location.?[1];
@@ -1167,7 +1172,6 @@ pub fn main() !u8 {
                     app_mouse.mouse_location = null;
 
                     if (app.loop_draw_mode == .view) break :blk;
-
                     if (loops.temp_screen_loop_len < 3) break :blk;
 
                     try embedLoopAndSave(loops.temp_screen_loop[0..loops.temp_screen_loop_len], view, d_zbuffer);
@@ -1191,24 +1195,29 @@ pub fn main() !u8 {
                     app_mouse.mouse_location.?[1] = py;
 
                     switch (app.loop_draw_mode) {
-                        .loop => {
+                        .loop => blk2: {
+                            if (event.motion.windowID != windy.windowID) break :blk2;
                             im.drawLine2(windy.pix, nx, x_old, y_old, px, py, colors.white);
                             try windy.update();
                             loops.temp_screen_loop[loops.temp_screen_loop_len] = .{ px, py };
                             loops.temp_screen_loop_len += 1;
                         },
-                        .rect => {
+                        .rect => blk2: {
+                            if (event.motion.windowID != windy_ortho.windowID) break :blk2;
                             const x0 = rect_being_drawn_vertex0[0];
                             const y0 = rect_being_drawn_vertex0[1];
 
-                            windy.setPixels(d_output.img); // bounding box already written to d_output.img!
-                            im.drawLine2(windy.pix, nx, x0, y0, px, y0, colors.red);
-                            im.drawLine2(windy.pix, nx, x0, y0, x0, py, colors.red);
-                            im.drawLine2(windy.pix, nx, px, py, px, y0, colors.red);
-                            im.drawLine2(windy.pix, nx, px, py, x0, py, colors.red);
-                            try windy.update();
+                            // windy.setPixels(d_output.img); // bounding box already written to d_output.img!
+                            windy_ortho.setPixels(windy_ortho_projection_rgba.img);
+                            const _nx = @intCast(u31, windy_ortho.nx);
+                            im.drawLine2(windy_ortho.pix, _nx, x0, y0, px, y0, colors.red);
+                            im.drawLine2(windy_ortho.pix, _nx, x0, y0, x0, py, colors.red);
+                            im.drawLine2(windy_ortho.pix, _nx, px, py, px, y0, colors.red);
+                            im.drawLine2(windy_ortho.pix, _nx, px, py, x0, py, colors.red);
+                            try windy_ortho.update();
                         },
-                        .view => {
+                        .view => blk2: {
+                            if (event.motion.windowID != windy.windowID) break :blk2;
                             mouseMoveCamera(px, py, x_old, y_old, &view);
                             windy.needs_update = true;
                         },
