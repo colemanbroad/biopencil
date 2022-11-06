@@ -280,6 +280,8 @@ they may describe buffers that require special buffer commands, or non-buffer ar
 - [x] dragging with cursor
 - [x] drawing with fw/bw 3D map 
 - [x] proper window size. has a max width, but otherwise is h/w proportional to x,y image size. anisotropy interpreted from image.
+- [x] connect two windows via draggable box
+- [ ] Allow window resize without changing the cost of opencl projection (keep number of rays small), then upscale them efficiently (maybe also on GPU?) related to kernel chaining?!
 - [ ] save anno to disk
 - [ ] live load of new data from disk / mem
 - [ ] REPL interface with autocomplete to adjust params. access nested, internal structs. interactive.

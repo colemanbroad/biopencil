@@ -11,7 +11,6 @@ pub fn build(b: *Builder) void {
         exe.setBuildMode(mode);
         exe.addIncludeDir("/usr/local/include/"); // tiff.h
         exe.addIncludeDir("libs/include/"); // CL/opencl.h
-
         exe.linkFramework("OpenCL");
         exe.linkSystemLibrary("tiff");
         exe.linkSystemLibrary("SDL2");
@@ -20,18 +19,14 @@ pub fn build(b: *Builder) void {
 
     {
         const exe = b.addTestExe("clbridge-test", "src/clbridge.zig");
-
-        // exe.addLibraryPath("/usr/local/lib"); (automatically linked in ???)
+        // exe.addLibraryPath("/usr/local/lib"); (automatically linked ???)
         exe.addIncludeDir("/usr/local/include/"); // tiff.h (required)
         exe.addIncludeDir("libs/include/"); // CL/opencl.h
-
         exe.linkFramework("OpenCL");
         exe.linkSystemLibrary("tiff");
         exe.linkSystemLibrary("SDL2");
-
         // exe.setFilter("test tiff open float image");
         // exe.setFilter("test TIFF vs raw speed");
-
         exe.install();
     }
 }

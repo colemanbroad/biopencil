@@ -746,8 +746,8 @@ fn embedLoopAndSave(loop: ScreenLoop, view: View, depth_buffer: Img2D(f32)) !voi
 const colors = struct {
     const white = [4]u8{ 255, 255, 255, 255 };
     const red = [4]u8{ 0, 0, 255, 255 };
-    // const yellow = [4]u8{ 0, 255, 0, 255 };
-    // const blue   = [4]u8{ 255, 0, 0, 255 };
+    const yellow = [4]u8{ 0, 255, 0, 255 };
+    const blue = [4]u8{ 255, 0, 0, 255 };
 };
 
 fn drawLoops(d_output: Img2D([4]u8), view: View) void {
@@ -828,6 +828,7 @@ const app = struct {
     var running = true;
     const ViewMode = enum { view, loop, rect };
     var loop_draw_mode: ViewMode = .view;
+    var rectmode: enum { blue, red } = .red;
 };
 
 test "test window creation" {
@@ -844,7 +845,9 @@ extern fn SDL_GetWindowSurface(window: *cc.SDL_Window) ?*cc.SDL_Surface;
 const Window = struct {
     sdl_window: *cc.SDL_Window,
     surface: *cc.SDL_Surface,
-    pix: [*c][4]u8,
+    // pix: [*c][4]u8,
+    // pix: [][4]u8,
+    pix: Img2D([4]u8),
 
     needs_update: bool,
     update_count: u64,
@@ -855,7 +858,7 @@ const Window = struct {
     const This = @This();
 
     /// WARNING: c managed heap memory mixed with our custom allocator
-    pub fn init(nx: u32, ny: u32) !This {
+    fn init(nx: u32, ny: u32) !This {
         var t1: i64 = undefined;
         var t2: i64 = undefined;
 
@@ -883,11 +886,22 @@ const Window = struct {
         print("SDL_GetWindowSurface [{}ms]\n", .{t2 - t1});
 
         // @breakpoint();
+        var pix: [][4]u8 = undefined;
+        pix.ptr = @ptrCast([*][4]u8, surface.pixels.?);
+        pix.len = nx * ny;
+
+        var img = Img2D([4]u8){
+            .img = pix,
+            .nx = nx,
+            .ny = ny,
+        };
 
         const res = .{
             .sdl_window = window,
             .surface = surface,
-            .pix = @ptrCast([*c][4]u8, surface.pixels.?),
+            // .pix = @ptrCast([*c][4]u8, surface.pixels.?),
+            // .pix = pix,
+            .pix = img,
             .needs_update = false,
             .update_count = 0,
             .windowID = cc.SDL_GetWindowID(window),
@@ -895,10 +909,10 @@ const Window = struct {
             .ny = ny,
         };
 
-        res.pix[50] = .{ 255, 255, 255, 255 };
-        res.pix[51] = .{ 255, 255, 255, 255 };
-        res.pix[52] = .{ 255, 255, 255, 255 };
-        res.pix[53] = .{ 255, 255, 255, 255 };
+        res.pix.img[50] = .{ 255, 255, 255, 255 };
+        res.pix.img[51] = .{ 255, 255, 255, 255 };
+        res.pix.img[52] = .{ 255, 255, 255, 255 };
+        res.pix.img[53] = .{ 255, 255, 255, 255 };
 
         return res;
     }
@@ -921,11 +935,66 @@ const Window = struct {
     fn setPixels(this: *This, buffer: [][4]u8) void {
         _ = cc.SDL_LockSurface(this.surface);
         for (buffer) |v, i| {
-            this.pix[i] = v;
+            this.pix.img[i] = v;
+        }
+        cc.SDL_UnlockSurface(this.surface);
+    }
+
+    // inline fn get(this: This, x: usize, y: usize) *[4]u8 {
+    //     return this.pix.get(x, y);
+    //     // return &this.pix[this.nx * y + x];
+    // }
+
+    fn setPixelsFromRectangle(this: *This, img: Img2D([4]u8), r: Rect) void {
+        _ = cc.SDL_LockSurface(this.surface);
+        // var x_idx: u32 = 0;
+        // var y_idx: u32 = 0;
+        // print("r0 = {any}\n", .{r0});
+
+        // assert(0 <= r.r0[0] + r.dr[0] <= this.nx);
+        assert(r.xmax - r.xmin == this.nx);
+        assert(r.ymax - r.ymin == this.ny);
+        // while (y_idx < this.ny) : (y_idx += 1) {
+        //     while (x_idx < this.nx) : (x_idx += 1) {
+        // const idx = this.nx * y_idx + x_idx;
+        for (this.pix.img) |*w, i| {
+            const x_idx = i % this.nx;
+            const y_idx = @divFloor(i, this.nx); // % this.ny;
+            const v = img.get(x_idx + r.xmin, y_idx + r.ymin).*;
+            // this.pix.get(x_idx, y_idx).* = v;
+            w.* = v;
+            // }
         }
         cc.SDL_UnlockSurface(this.surface);
     }
 };
+
+const I2 = @Vector(2, i32);
+const Rect2 = struct { r0: I2, dr: I2 };
+
+fn rect2ToRect(r: Rect2) Rect {
+    return sortRect(Rect{ .xmin = @intCast(u32, r.r0[0]), .xmax = @intCast(u32, r.r0[0] + r.dr[0]), .ymin = @intCast(u32, r.r0[1]), .ymax = @intCast(u32, r.r0[1] + r.dr[1]) });
+}
+
+fn rectToRect2(r: Rect) Rect2 {
+    return Rect2{ .r0 = .{ r.xmin, r.ymin }, .dr = .{ r.xmax - r.xmin, r.ymax - r.ymin } };
+}
+
+// NOTE: we add the `sorted` flag to help avoid manual creation of Rect{...} without first sorting.
+const Rect = struct { xmin: u32, xmax: u32, ymin: u32, ymax: u32, sorted: bool = false };
+
+fn sortRect(r0: Rect) Rect {
+    return .{ .xmin = min(r0.xmin, r0.xmax), .xmax = max(r0.xmin, r0.xmax), .ymin = min(r0.ymin, r0.ymax), .ymax = max(r0.ymin, r0.ymax), .sorted = true };
+}
+
+// test "test c pointer to slice cast" {
+//     const arr = [1]u16{0} ** 10;
+//     const cptr = @ptrCast([*c]u16, &arr[0]);
+//     // const slice = @ptrCast()
+// }
+
+const min = std.math.min;
+const max = std.math.max;
 
 // const App = struct {
 //     al: std.mem.Allocator,
@@ -999,14 +1068,26 @@ pub fn main() !u8 {
     t2 = milliTimestamp();
     print("initialize buffers [{}ms]\n", .{t2 - t1});
 
+    // orthogonal window
     var windy_ortho = try Window.init(grey.nx, grey.ny);
     const windy_ortho_projection = try maxProjectionOrtho(grey);
     const windy_ortho_projection_rgba = try intensityToRGBA(windy_ortho_projection);
     windy_ortho.setPixels(windy_ortho_projection_rgba.img);
     try windy_ortho.update();
 
+    // small window
+    var windy_ortho_small = try Window.init(256, 256);
+    // var blue_rectangle = Rect{ .xmin = 0, .ymin = 0, .xmax = 256, .ymax = 256, .sorted = true };
+    var blue_rectangle = Rect2{ .r0 = .{ 0, 0 }, .dr = .{ 256, 256 } };
+
+    // 3D window
     var windy = try Window.init(nx, ny);
-    // TODO: window deinit()
+
+    cc.SDL_SetWindowPosition(windy.sdl_window, 0, 0);
+    cc.SDL_SetWindowPosition(windy_ortho.sdl_window, nx, 0);
+    cc.SDL_SetWindowPosition(windy_ortho_small.sdl_window, nx, ny);
+
+    // done with window creation
 
     t1 = milliTimestamp();
     const mima = im.minmax(f32, grey.img);
@@ -1124,6 +1205,10 @@ pub fn main() !u8 {
                         },
                         cc.SDLK_r => {
                             app.loop_draw_mode = .rect;
+                            app.rectmode = .red;
+                        },
+                        cc.SDLK_b => {
+                            app.rectmode = .blue;
                         },
                         cc.SDLK_x => blk: {
                             // app.loop_draw_mode = .rect;
@@ -1197,23 +1282,38 @@ pub fn main() !u8 {
                     switch (app.loop_draw_mode) {
                         .loop => blk2: {
                             if (event.motion.windowID != windy.windowID) break :blk2;
-                            im.drawLine2(windy.pix, nx, x_old, y_old, px, py, colors.white);
+                            // im.drawLine2(windy.pix, nx, x_old, y_old, px, py, colors.white);
+                            im.drawLineInBounds([4]u8, windy.pix, x_old, y_old, px, py, colors.white);
                             try windy.update();
                             loops.temp_screen_loop[loops.temp_screen_loop_len] = .{ px, py };
                             loops.temp_screen_loop_len += 1;
                         },
                         .rect => blk2: {
+                            // a
                             if (event.motion.windowID != windy_ortho.windowID) break :blk2;
                             const x0 = rect_being_drawn_vertex0[0];
                             const y0 = rect_being_drawn_vertex0[1];
 
                             // windy.setPixels(d_output.img); // bounding box already written to d_output.img!
                             windy_ortho.setPixels(windy_ortho_projection_rgba.img);
-                            const _nx = @intCast(u31, windy_ortho.nx);
-                            im.drawLine2(windy_ortho.pix, _nx, x0, y0, px, y0, colors.red);
-                            im.drawLine2(windy_ortho.pix, _nx, x0, y0, x0, py, colors.red);
-                            im.drawLine2(windy_ortho.pix, _nx, px, py, px, y0, colors.red);
-                            im.drawLine2(windy_ortho.pix, _nx, px, py, x0, py, colors.red);
+                            switch (app.rectmode) {
+                                .red => {
+                                    // const red_rectangle = sortRect(Rect{ .xmin = x0, .ymin = y0, .xmax = px, .ymax = py });
+                                    const dr0 = @intCast(i32, px) - @intCast(i32, x0);
+                                    const dr1 = @intCast(i32, py) - @intCast(i32, y0);
+                                    const red_rectangle = Rect2{ .r0 = .{ x0, y0 }, .dr = .{ dr0, dr1 } };
+                                    drawRectangle2(windy_ortho, red_rectangle, colors.red);
+                                },
+                                .blue => {
+                                    blue_rectangle.r0 = .{ px, py };
+                                    blue_rectangle.r0 -= I2{ 128, 128 };
+                                    blue_rectangle.r0[0] = std.math.clamp(blue_rectangle.r0[0], 0, windy_ortho.nx - 256 - 1);
+                                    blue_rectangle.r0[1] = std.math.clamp(blue_rectangle.r0[1], 0, windy_ortho.ny - 256 - 1);
+                                    drawRectangle2(windy_ortho, blue_rectangle, colors.blue);
+                                    windy_ortho_small.setPixelsFromRectangle(windy_ortho_projection_rgba, rect2ToRect(blue_rectangle));
+                                    try windy_ortho_small.update();
+                                },
+                            }
                             try windy_ortho.update();
                         },
                         .view => blk2: {
@@ -1252,6 +1352,29 @@ pub fn main() !u8 {
     }
 
     return 0;
+}
+
+fn drawRectangle2(window: Window, r: Rect2, color: [4]u8) void {
+    const x0 = @intCast(u31, r.r0[0]);
+    const x1 = @intCast(u31, r.r0[0] + r.dr[0]);
+    const y0 = @intCast(u31, r.r0[1]);
+    const y1 = @intCast(u31, r.r0[1] + r.dr[1]);
+    im.drawLineInBounds([4]u8, window.pix, x0, y0, x1, y0, color);
+    im.drawLineInBounds([4]u8, window.pix, x0, y0, x0, y1, color);
+    im.drawLineInBounds([4]u8, window.pix, x1, y1, x1, y0, color);
+    im.drawLineInBounds([4]u8, window.pix, x1, y1, x0, y1, color);
+}
+
+fn drawRectangle(window: Window, r: Rect, color: [4]u8) void {
+    // const _nx = @intCast(u31, window.nx);
+    const x0 = @intCast(u31, r.xmin);
+    const x1 = @intCast(u31, r.xmax);
+    const y0 = @intCast(u31, r.ymin);
+    const y1 = @intCast(u31, r.ymax);
+    im.drawLineInBounds([4]u8, window.pix, x0, y0, x1, y0, color);
+    im.drawLineInBounds([4]u8, window.pix, x0, y0, x0, y1, color);
+    im.drawLineInBounds([4]u8, window.pix, x1, y1, x1, y0, color);
+    im.drawLineInBounds([4]u8, window.pix, x1, y1, x0, y1, color);
 }
 
 fn intensityToRGBA(img: Img2D(f32)) !Img2D([4]u8) {
