@@ -1,9 +1,12 @@
 const std = @import("std");
+
 const im = @import("image_base.zig");
 const print = std.debug.print;
 const assert = std.debug.assert;
 const expect = std.testing.expect;
 const eql = std.mem.eql;
+const min = std.math.min;
+const max = std.math.max;
 
 const milliTimestamp = std.time.milliTimestamp;
 
@@ -343,8 +346,6 @@ pub fn Kernel(
     comptime _kern_name: []const u8,
     comptime _argtype: []const ArgTypes,
 ) type {
-    // assert(containsOnly(_argtype, "rwxi"));
-
     return struct {
         const Self = @This();
 
@@ -676,7 +677,6 @@ fn drawScreenLoop(sl: ScreenLoop, d_output: Img2D([4]u8)) void {
     }
 
     // DONT ACTUALLY COMPLETE THE LOOP.
-
     // im.drawLine(
     //     [4]u8,
     //     d_output,
@@ -700,18 +700,9 @@ fn volumeLoop2ScreenLoop(view: View, vl: VolumeLoop) ScreenLoop {
     return loops.temp_screen_loop[0..n];
 }
 
-// fn screenLoop2VolumeLoop(sl: ScreenLoop, view: View, zbuf: Img2D(f32)) VolumeLoop {}
-
-// fn zmean(filtered_positions: [][3]f32) f32 {
-//     var total: f32 = 0;
-//     for (filtered_positions) |v| total += v[2];
-//     return total / @intToFloat(f32, filtered_positions.len);
-// }
-
 /// embed ScreenLoop inside volume with normalized coords [-1,1]^3
 ///  since our data is noisy, we can't always expect that the maxval of the intensity is from
-///  the object we intend. we could deal with this by _denoising_ the loop depth, the image depth buffer,
-///
+///  the object we intend. we could deal with this by _denoising_ the loop depth or the image depth buffer.
 fn embedLoopAndSave(loop: ScreenLoop, view: View, depth_buffer: Img2D(f32)) !void {
 
     // NOTE: we're looping over pixel knots in our Loop, but this does not include pixels drawn interpolated between knot points.
@@ -763,9 +754,6 @@ fn drawLoops(d_output: Img2D([4]u8), view: View) void {
     }
 }
 
-// var mybuf = [_]u8{0} ** 10_000;
-// const fba = std.heap.FixedBufferAllocator(mybuf);
-
 const loops = struct {
 
     // This buffer stores pixel locations as a loop is being drawn before it's embeded and saved.
@@ -794,7 +782,6 @@ const loops = struct {
     // pub fn handleMouseDown() {}
     // pub fn handleMouseUp() {}
     // pub fn handleMouseMove() {}
-
 };
 
 const rects = struct {
@@ -807,22 +794,6 @@ const rects = struct {
     fn onMouseUp() void {}
     fn onMouseMove() void {}
 };
-
-// const Screen = struct {
-//     surface: *cc.SDL_Surface,
-//     needs_update: bool,
-//     update_count: u64,
-// };
-
-// TODO: Let the mode determine how to handle key and mouse input.
-
-// const Knowable = enum { true, false, unknown };
-
-// const app_mouse = struct {
-//     var mousedown: bool = false;
-//     var mouse_location: ?[2]u31 = null; // from top left of Window
-//     // var mouse_in_window: enum { true, false, unknown } = .unknown;
-// };
 
 const app = struct {
     var running = true;
@@ -987,27 +958,6 @@ fn sortRect(r0: Rect) Rect {
     return .{ .xmin = min(r0.xmin, r0.xmax), .xmax = max(r0.xmin, r0.xmax), .ymin = min(r0.ymin, r0.ymax), .ymax = max(r0.ymin, r0.ymax), .sorted = true };
 }
 
-// test "test c pointer to slice cast" {
-//     const arr = [1]u16{0} ** 10;
-//     const cptr = @ptrCast([*c]u16, &arr[0]);
-//     // const slice = @ptrCast()
-// }
-
-const min = std.math.min;
-const max = std.math.max;
-
-// const App = struct {
-//     al: std.mem.Allocator,
-//     window1: Window,
-//     window2: Window,
-//     dcqp : DevCtxQueProg,
-//     grey : Img3D(f32),
-//     annotations : Anno,
-//     loops : Loops,
-
-//     const This = @This();
-
-// };
 
 ///
 ///  Load and Render TIFF with OpenCL and SDL.
@@ -1422,13 +1372,6 @@ fn cmapCool() [256][4]u8 {
     }
     return cmap;
 }
-
-/// Max of ten segments per color
-// const LSCmap = struct {
-//     red: [10]?[3]f32,
-//     green: [10]?[3]f32,
-//     blue: [10]?[3]f32,
-// };
 
 /// Follows matplotlib colormap convention for piecewise linear colormaps
 fn piecewiseLinearInterpolation(comptime n: u16, pieces: []const [3]f32) [n]f32 {
@@ -1971,7 +1914,7 @@ fn mouseMoveCamera(x: i32, y: i32, x_old: i32, y_old: i32, view: *View) void {
     view.phi = std.math.clamp(view.phi, -3.1415 / 2.0, 3.1415 / 2.0);
 
     // view.view_matrix = lookAtOrigin(cam, .ZYX);
-    view.view_matrix = viewmatrix_from_theta_phi(view.theta, view.phi);
+    view.view_matrix = viewMatrixFromThetaPhi(view.theta, view.phi);
 }
 
 fn sliceL2Norm(arr: anytype) f32 {
@@ -1996,7 +1939,7 @@ const Mat3x3 = [9]f32;
 /// x' =  norm (dr/d_theta)
 /// y' =  dr/d_phi
 /// z' = -r(theta,phi)'
-fn viewmatrix_from_theta_phi(theta: f32, phi: f32) [9]f32 {
+fn viewMatrixFromThetaPhi(theta: f32, phi: f32) [9]f32 {
     const x = normV3(V3{ @cos(theta) * @cos(phi), 0, @sin(theta) * @cos(phi) }); // x
     const y = V3{ -@sin(theta) * @sin(phi), @cos(phi), @cos(theta) * @sin(phi) }; // y
     const z = V3{ -@sin(theta) * @cos(phi), -@sin(phi), @cos(theta) * @cos(phi) }; // z

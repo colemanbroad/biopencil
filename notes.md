@@ -1,27 +1,5 @@
 Get rendered image to appear in a SDL window.
 
-- Commands
-- Wed Sep 28 00:29:14 2022
-- Tue Oct  4 16:54:47 2022
-- Wed Oct  5 15:16:13 2022
-- Thu Oct  6 14:56:58 2022
-- Mon Oct 17 12:40:49 EDT 2022
-- Thu Oct 20 13:28:27 EDT 2022
-- Sun Oct 23 12:37:26 EDT 2022
-- Performance
-- Loading data
-- Model Hierarchy
-- Architecture and control flow
-- Modal Editing
-- Drawing in 3D
-- Easy 3D bounding box creation and extension in depth
-- Mouse controls | View
-- Tracking Mode
-- OpenCL : Let's rethink how we describe kernel parameters
-- Features
-- Bugs
-- Zig Questions
-
 # Commands
 
 grep '^#' notes.md | sed 's/#/-/'  # Print a table of contents from `notes.md` 
@@ -101,7 +79,6 @@ This volume should be easily customizable and draggable through the full volume.
 This also makes computing the projection easier as we make the volume smaller.
 
 
----
 
 # Performance
 
@@ -150,6 +127,7 @@ It may actually be faster to load using the RGBA tiff interface than the `TIFFRa
 
 # Model Hierarchy
 
+```
 App.mouse : Mouse
 App.window_main : Window
 App.window_view : Window
@@ -173,26 +151,46 @@ myCL is a namespace that holds:
       perspective_projection.view : View
       perspective_projection.args : Tuple
       median_filter
+```
 
 
 Since View is used in and out of Kernels it cannot be a Kernel-specific type.
 We can also use View for drawing loops w CPU.
 
+```
 embedLoops(View)
 perspective_projection.kernel.call(View)
+```
 
 View must be global?
 
 
 # Architecture and control flow
 
-- why is updating loop.temp... allowed ?
-- can i edit namespaced vars from a method ? loops.method() ?
+- Why is updating loop.temp... allowed ?
+- Can i edit namespaced vars from a method i.e. loops.method() ?
 - Model / View style or mixed view and control style?
-	- Model / View style requires that I have separate control flow (1) for updating my model(input) and (2) for updating my view(model).
-	- While the everything-together approach mixes view updates into the model update control flow...
-	- I'm going to try separating them and see what happens...
-	
+  
+  Model / View style requires that I have separate control flow (1) for updating my model(input) and (2) for updating my view(model).
+  While the everything-together approach mixes view updates into the model update control flow...
+  I'm going to try separating them and see what happens...
+
+- What are the intermediate computations I should save / cache / use as named variables ... 
+
+Cacheing vs memoization vs 
+Simply *naming a variable* is a way of caching a computation that might be considered "intermediate".
+E.g. see how `a` caches an intermediate result in computing `res`.
+
+```
+res = (x**2 - 3)(x**2 + 3)
+--- vs 
+a = x**2
+res = (a-3)(a+3)
+```
+
+
+
+
 
 # Modal Editing
 
@@ -231,10 +229,9 @@ Of course there may be multiple intersection points... We have to disambiguate t
       - 3D required for volume rendering in 2nd window / 3D bbox annotations
       - can infer 3D bbox from 2D using heuristics
 
+---
 
-
-
-# Mouse controls | View
+# Mouse controls / view
 
 Idea to use spherical coordinates from [here](https://quaternions.online/).
 R/gamedev also recommends spherical coords [here](https://www.reddit.com/r/gamedev/comments/16zejj/3d_camera_orbit_drag_zoom/).
