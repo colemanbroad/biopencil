@@ -809,8 +809,8 @@ test "test window creation" {
 
 const SDL_WINDOWPOS_UNDEFINED = @bitCast(c_int, cc.SDL_WINDOWPOS_UNDEFINED_MASK);
 
-// For some reason, this isn't parsed automatically. According to SDL docs, the
-// surface pointer returned is optional!
+/// For some reason, this isn't parsed automatically. According to SDL docs, the
+/// surface pointer returned is optional!
 extern fn SDL_GetWindowSurface(window: *cc.SDL_Window) ?*cc.SDL_Surface;
 
 const Window = struct {
@@ -1641,7 +1641,7 @@ fn lerp(lo: f32, mid: f32, hi: f32, valLo: f32, valHi: f32) f32 {
     return valLo * (hi - mid) / (hi - lo) + valHi * (mid - lo) / (hi - lo);
 }
 
-// Requires XYZ order (or some rotation thereof)
+/// Requires XYZ order (or some rotation thereof)
 pub fn cross(a: V3, b: V3) V3 {
     return V3{
         a[1] * b[2] - a[2] * b[1],
@@ -1839,67 +1839,6 @@ test "test TIFF vs raw speed" {
 // IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS
 // IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS
 // IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS  IMAGE FILTERS
-
-// XY format . TODO: ensure inline ?
-pub inline fn inbounds(img: anytype, px: anytype) bool {
-    if (0 <= px[0] and px[0] < img.nx and 0 <= px[1] and px[1] < img.ny) return true else return false;
-}
-
-// Run a simple min-kernel over the image to remove noise.
-fn minfilter(al: std.mem.Allocator, img: Img2D(f32)) !void {
-    const nx = img.nx;
-    // const ny = img.ny;
-    const s = img.img; // source
-    const t = try al.alloc(f32, s.len); // target
-    defer al.free(t);
-    const deltas = [_]@Vector(2, i32){ .{ -1, 0 }, .{ 0, 1 }, .{ 1, 0 }, .{ 0, -1 }, .{ 0, 0 } };
-
-    for (s) |_, i| {
-        // const i = @intCast(u32,_i);
-        var mn = s[i];
-        const px = @Vector(2, i32){ @intCast(i32, i % nx), @intCast(i32, i / nx) };
-        for (deltas) |dpx| {
-            const p = px + dpx;
-            const v = if (inbounds(img, p)) s[@intCast(u32, p[0]) + nx * @intCast(u32, p[1])] else 0;
-            mn = std.math.min(mn, v);
-        }
-        t[i] = mn;
-    }
-
-    // for (s) |_,i| {
-    // }
-    for (img.img) |*v, i| {
-        v.* = t[i];
-    }
-}
-
-// Run a simple min-kernel over the image to remove noise.
-fn blurfilter(al: std.mem.Allocator, img: Img2D(f32)) !void {
-    const nx = img.nx;
-    // const ny = img.ny;
-    const s = img.img; // source
-    const t = try al.alloc(f32, s.len); // target
-    defer al.free(t);
-    const deltas = [_]@Vector(2, i32){ .{ -1, 0 }, .{ 0, 1 }, .{ 1, 0 }, .{ 0, -1 }, .{ 0, 0 } };
-
-    for (s) |_, i| {
-        // const i = @intCast(u32,_i);
-        var x = @as(f32, 0); //s[i];
-        const px = @Vector(2, i32){ @intCast(i32, i % nx), @intCast(i32, i / nx) };
-        for (deltas) |dpx| {
-            const p = px + dpx;
-            const v = if (inbounds(img, p)) s[@intCast(u32, p[0]) + nx * @intCast(u32, p[1])] else 0;
-            x += v;
-        }
-        t[i] = x / 5;
-    }
-
-    // for (s) |_,i| {
-    // }
-    for (img.img) |*v, i| {
-        v.* = t[i];
-    }
-}
 
 /// update camera position in (theta, phi) coordinates from mouse movement.
 /// determine transformation matrix from camera location.

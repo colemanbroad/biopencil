@@ -26,7 +26,7 @@ fast and efficient volume renderning with rotation and color, takes a TIFF path 
 
 Parameterize view state by 3x3 rotation matrix and update it with arrow keys.
 This is more powerful representation than the previous `view_angles:[2]f32` model
-which required a view_angles →  rotation matrix transformation (`rotmatFromAngles()`), but we could update view_angles by 
+which required a view_angles → rotation matrix transformation (`rotmatFromAngles()`), but we could update view_angles by 
 simply adding a scalar value. 
 
 - [x] use `setPixels()` for faster surface blitting.

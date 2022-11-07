@@ -353,33 +353,6 @@ pub fn myabs(a: anytype) @TypeOf(a) {
     if (a < 0) return -a else return a;
 }
 
-pub fn drawLine2(img: [*][4]u8, img_nx: u31, _x0: u31, _y0: u31, x1: u31, y1: u31, val: [4]u8) void {
-    var x0: i32 = _x0;
-    var y0: i32 = _y0;
-    const dx = myabs(x1 - x0);
-    const sx: i8 = if (x0 < x1) 1 else -1;
-    const dy = -myabs(y1 - y0);
-    const sy: i8 = if (y0 < y1) 1 else -1;
-    var err: i32 = dx + dy; //
-    var e2: i32 = 0;
-
-    while (true) {
-        const idx = @intCast(u32, x0) + img_nx * @intCast(u32, y0);
-        img[idx] = val;
-        e2 = 2 * err;
-        if (e2 >= dy) {
-            if (x0 == x1) break;
-            err += dy;
-            x0 += sx;
-        }
-        if (e2 <= dx) {
-            if (y0 == y1) break;
-            err += dx;
-            y0 += sy;
-        }
-    }
-}
-
 pub fn drawLine(comptime T: type, img: Img2D(T), _x0: u31, _y0: u31, x1: u31, y1: u31, val: T) void {
     var x0: i32 = _x0;
     var y0: i32 = _y0;
@@ -507,5 +480,61 @@ pub fn drawCircleOutline(pic: Img2D([4]u8), xm: i32, ym: i32, _r: i32, val: [4]u
             x += 1;
             err += x * 2 + 1; //  /* -> x-step now */
         } //  /* e_xy+e_x > 0 or no 2nd y-step */
+    }
+}
+
+/// Run a simple min-kernel over the image to remove noise.
+fn minfilter(alo: std.mem.Allocator, img: Img2D(f32)) !void {
+    const nx = img.nx;
+    // const ny = img.ny;
+    const s = img.img; // source
+    const t = try alo.alloc(f32, s.len); // target
+    defer alo.free(t);
+    const deltas = [_]@Vector(2, i32){ .{ -1, 0 }, .{ 0, 1 }, .{ 1, 0 }, .{ 0, -1 }, .{ 0, 0 } };
+
+    for (s) |_, i| {
+        // const i = @intCast(u32,_i);
+        var mn = s[i];
+        const px = @Vector(2, i32){ @intCast(i32, i % nx), @intCast(i32, i / nx) };
+        for (deltas) |dpx| {
+            const p = px + dpx;
+            const v = if (inbounds(img, p)) s[@intCast(u32, p[0]) + nx * @intCast(u32, p[1])] else 0;
+            mn = std.math.min(mn, v);
+        }
+        t[i] = mn;
+    }
+
+    // for (s) |_,i| {
+    // }
+    for (img.img) |*v, i| {
+        v.* = t[i];
+    }
+}
+
+/// Run a simple min-kernel over the image to remove noise.
+fn blurfilter(alo: std.mem.Allocator, img: Img2D(f32)) !void {
+    const nx = img.nx;
+    // const ny = img.ny;
+    const s = img.img; // source
+    const t = try alo.alloc(f32, s.len); // target
+    defer alo.free(t);
+    const deltas = [_]@Vector(2, i32){ .{ -1, 0 }, .{ 0, 1 }, .{ 1, 0 }, .{ 0, -1 }, .{ 0, 0 } };
+
+    for (s) |_, i| {
+        // const i = @intCast(u32,_i);
+        var x = @as(f32, 0); //s[i];
+        const px = @Vector(2, i32){ @intCast(i32, i % nx), @intCast(i32, i / nx) };
+        for (deltas) |dpx| {
+            const p = px + dpx;
+            const v = if (inbounds(img, p)) s[@intCast(u32, p[0]) + nx * @intCast(u32, p[1])] else 0;
+            x += v;
+        }
+        t[i] = x / 5;
+    }
+
+    // for (s) |_,i| {
+    // }
+    for (img.img) |*v, i| {
+        v.* = t[i];
     }
 }
