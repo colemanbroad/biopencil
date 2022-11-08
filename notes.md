@@ -269,6 +269,40 @@ Parameters may be read or write (rw), they may be written once or repeatedly (1!
 they may describe buffers that require special buffer commands, or non-buffer args (bn).
 
 
+# Building and Dependencies
+
+I'd like to build a static version of `bioviewer` that works on other systems running macos-x86_64.
+Brew installs static libraries (`.a`) in addition to dynamic (`.dylib`). 
+But linking against them is not as simple as replacing `linkSystemLibrary` with `addObjectFile`.
+Attempting to build now reveals a littany of missing symbols during linking...
+```
+error(link): undefined reference to symbol '_objc_sync_enter'
+error(link):   first referenced in '/usr/local/Cellar/sdl2/2.0.14_1/lib/libSDL2.a(SDL_cocoawindow.o)'
+error(link): undefined reference to symbol '_jpeg_set_defaults'
+error(link):   first referenced in '/usr/local/Cellar/libtiff/4.4.0_1/lib/libtiff.a(tif_jpeg.o)'
+...
+```
+These missing symbols live in the transitive dependencies of my project, which are often the direct dependencies of `SDL` and `TIFF` libraries.
+Some of these deps live in macos Frameworks, and after linking Frameworks (e.g. `exe.linkFramework("Cocoa")`) I can make some of these messages go away.
+**But I'm not using these dependencies!!**
+Q: Is there a way to static build that avoids these dependencies?
+Q: Does building from source allow me to avoid these dependencies?
+Q: 
+
+https://www.reddit.com/r/gamedev/comments/o5qrao/sdl2_is_zlib_licensed_but_why_its_not_included_in/
+
+My [github search](https://cs.github.com/?scopeName=All+repos&scope=&q=lang%3Azig+libSDL2) shows that:
+1. linking `*.a` requires explicitly including transitive deps
+2. linking SDL2 on macos is usually done using brew and dynamic linking. Fine, I give up, i'll just use brew...
+
+**I could include run some brew commands as a part of build!**
+But this sounds hairy...
+
+
+
+
+
+
 # Features
 
 
