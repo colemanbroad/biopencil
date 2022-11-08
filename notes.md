@@ -80,7 +80,7 @@ This also makes computing the projection easier as we make the volume smaller.
 
 
 
-# Performance
+# Performance / Profiling
 
 Reading TIFF is slow. 95MB tiff file reads in 2s... Most of this must be decoding, because I can `dd` the file to `/dev/null/` at 4GB/s.
       UPDATE: 84MB tiff Tribolium reads in 1.3s. This is def too slow.
@@ -125,7 +125,19 @@ Reading from TIFF is slower than reading from RAW using `Img3D.load()`.
 
 It may actually be faster to load using the RGBA tiff interface than the `TIFFRasterScanlineSize64` interface!? confirm and explain this.
 
-# Model Hierarchy
+# App structure
+
+Unfortunately a zig bug prevents us from keeping app state in a single global namespace, ala
+```zig
+const app = struct {
+      var mouse = ...
+      var window_main = ...
+      var window_side = ...
+      ...
+};
+```
+This would 
+
 
 ```
 App.mouse : Mouse
@@ -189,9 +201,6 @@ res = (a-3)(a+3)
 ```
 
 
-
-
-
 # Modal Editing
 
 Modal editing should include modes for editing LABEL IMAGES / RAW FLUORESCENCE / etc !
@@ -201,35 +210,6 @@ Different image semantics: nuclear marker, membrane marker, u16 object labels, p
 generic fluorescence, histology rgb?
 
 
-# Drawing in 3D
-
-We want to draw smooth lines at the precision level of the _view_ not of the underlying image.
-Thus we want 3x f32 coordinates and linear interpolation between those points.
-We can save, sort, color, select, name, etc objects at the object level, and objects don't merge
-together even if our lines cross!
-
-We can use pixelToRay() to get the ray to cast into the volume, but then how far do we go?
-go until each ray hits the z from zbuffer.
-
---- 
-
-We could provide a more precise option for 3D drawing, where you first draw in max-proj view, 
-but then are presented with a side view (orthogonal?) to control the depth by tracing with your pencil.
-
-The surface is defined by the intersection of the two sheets defined by the two view's Rays. 
-Of course there may be multiple intersection points... We have to disambiguate them somehow.
-
-# Easy 3D bounding box creation and extension in depth
-
-- a collection of rectangles / bboxes
-- rendering during drawing and during rotation
-- move existing rectangles
-- live view updating in 2nd window
-- Q: are they 2d or 3d ? 
-      - 3D required for volume rendering in 2nd window / 3D bbox annotations
-      - can infer 3D bbox from 2D using heuristics
-
----
 
 # Mouse controls / view
 
@@ -255,22 +235,66 @@ r_y =         -sin(theta) * sin(phi),  cos(phi),   cos(theta) * sin(phi)
 r_z =         -sin(theta) * cos(phi), -sin(phi),   cos(theta) * cos(phi) 
 ```
 
-# Tracking Mode
 
-- [ ] allow object to occlude tracking tails
-- [ ] manual tracking annotation in max projection view uses smart depth inference
-- [ ] extend tracks by dragging mouse with right hand and tapping "space" with left to advance time point.
-      - [ ] use same workflow for moving bounding boxes through time.
+# Building and Dependencies
+
+Starting out, I thought this was a ZIG problem, but now I know it's really a MACOS problem.
+
+I'd like to build a static version of `bioviewer` that works on other systems running macos-x86_64.
+Brew installs static libraries (`.a`) in addition to dynamic (`.dylib`). 
+But linking against them is not as simple as replacing `linkSystemLibrary` with `addObjectFile`.
+
+My [github search](https://cs.github.com/?scopeName=All+repos&scope=&q=lang%3Azig+libSDL2) shows that
+1. linking `*.a` requires explicitly including transitive deps
+2. linking SDL2 on macos is usually done using brew and dynamic linking.
+
+**I could include run some brew commands as a part of build!**
+But this sounds scary. I don't want to mess up my user's brew system!
+
+Attempting to build now reveals a littany of missing symbols during linking...
+```
+error(link): undefined reference to symbol '_objc_sync_enter'
+error(link):   first referenced in '/usr/local/Cellar/sdl2/2.0.14_1/lib/libSDL2.a(SDL_cocoawindow.o)'
+error(link): undefined reference to symbol '_jpeg_set_defaults'
+error(link):   first referenced in '/usr/local/Cellar/libtiff/4.4.0_1/lib/libtiff.a(tif_jpeg.o)'
+...
+```
+These missing symbols live in the transitive dependencies of my project, which are often the direct dependencies of `SDL` and `TIFF` libraries.
+
+We can determine the set of dependencies by using `otool`.
+We run `otool -L zig-out/bin/biopencil` to see our link dependencies.
+Initially it shows `libtiff.dylib`,`libSDL2.dylib`, the `OpenCL.framework` and `libSystem.B.dylib`.
+But these are only our direct dependencies!
+
+We can use otool recursively [via python](https://stackoverflow.com/questions/1517614/using-otool-recursively-to-find-shared-libraries-needed-by-an-app) (see `detect_dylibs.py`), but in pracitce it was easier to do this manually...
+This reveals 2nd order deps: `libjpeg.8.dylib` and `libz.1.dylib`.
+
+- [dealing with iconv](https://stackoverflow.com/questions/57734434/libiconv-or-iconv-undefined-symbol-on-mac-osx)
+
+Some of these deps live in macos Frameworks, e.g. `Cocoa`.
+I can static link `libjpeg` and dynamic link (a lot of) Frameworks.
+This in theory allows distributing binaries that don't require installing 3rd party libs.
 
 
-# OpenCL : Let's rethink how we describe kernel parameters
 
-Parameters may be read or write (rw), they may be written once or repeatedly (1!)...
-they may describe buffers that require special buffer commands, or non-buffer args (bn).
+__But I'm not using these dependencies!__
+Unnecessary dependencies shrink viable set of target systems.
+
+Q1: Is there a way to static build that avoids unnecessary dependencies?
+Q2: Does building from source allow me to avoid these dependencies?
+
+- [attempting backwards compatibility on macos despite dynamic linking](https://stackoverflow.com/questions/15091105/confusion-of-how-to-make-osx-app-backward-compatible-how-to-test-them)
+- [why don't people vendor SDL2?](https://www.reddit.com/r/gamedev/comments/o5qrao/sdl2_is_zlib_licensed_but_why_its_not_included_in/)
+
+## Static linking on OSX is discouraged
+
+Apparently [it is common](https://stackoverflow.com/questions/844819/how-to-static-link-on-os-x) to static link against a third user library while dynamically linking against the system frameworks and libraries.
+[Pure static linking including all Frameworks is not possible.](https://developer.apple.com/library/archive/qa/qa1118/_index.html)
+
+
 
 
 # Features
-
 
 - [x] two rotation angles
 - [x] box around border
@@ -278,15 +302,73 @@ they may describe buffers that require special buffer commands, or non-buffer ar
 - [x] drawing with fw/bw 3D map 
 - [x] proper window size. has a max width, but otherwise is h/w proportional to x,y image size. anisotropy interpreted from image.
 - [x] connect two windows via draggable box
-- [ ] Allow window resize without changing the cost of opencl projection (keep number of rays small), then upscale them efficiently (maybe also on GPU?) related to kernel chaining?!
 - [ ] save anno to disk
-- [ ] live load of new data from disk / mem
+- [ ] Scroll through time. Live load of new data from disk / mem.
 - [ ] REPL interface with autocomplete to adjust params. access nested, internal structs. interactive.
 - [ ] colors: smoother color pallete...
 - [ ] semantic labels for objects, object selection and manipulation, colors based on object label.
 - [ ] add text labels pointing to objects that follow them over time and during view manipulation, rotation, etc.
-- [ ] Loops and BoundingBox are always drawn on top of image... Should they be ? No, this is why we started this project in the first place.
-- [ ] Dynamically adjust the quality of depth rendering while view is updating. (lower density sampling in X,Y,and Z) Still shots get higher quality?
+- [ ] Loops and BoundingBox partial occlusion by nuclei
+- [ ] #perf Allow window resize without changing the cost of opencl projection (keep number of rays small), then upscale them efficiently (maybe also on GPU?) related to kernel chaining?!
+- [ ] #perf Dynamically adjust the quality of depth rendering while view is updating. (lower density sampling in X,Y,and Z) Still shots get higher quality?
+
+## Tracking Mode
+
+- [ ] allow object to occlude tracking tails
+- [ ] manual tracking annotation in max projection view uses smart depth inference
+- [ ] extend tracks by dragging mouse with right hand and tapping "space" with left to advance time point.
+      - [ ] use same workflow for moving bounding boxes through time.
+
+
+## Loading data
+
+Make sure we can open TIFF files with
+
+- [x] multiple bit depth
+- [x] uint,int,float
+- [ ] multiple samples per pixel (channels)
+- [ ] 2D/3D/4D (time)
+
+## Drawing in 3D
+
+We want to draw smooth lines at the precision level of the _view_ not of the underlying image.
+Thus we want 3x f32 coordinates and linear interpolation between those points.
+We can save, sort, color, select, name, etc objects at the object level, and objects don't merge
+together even if our lines cross!
+
+We can use pixelToRay() to get the ray to cast into the volume, but then how far do we go?
+go until each ray hits the z from zbuffer.
+
+--- 
+
+We could provide a more precise option for 3D drawing, where you first draw in max-proj view, 
+but then are presented with a side view (orthogonal?) to control the depth by tracing with your pencil.
+
+The surface is defined by the intersection of the two sheets defined by the two view's Rays. 
+Of course there may be multiple intersection points... We have to disambiguate them somehow.
+
+
+## Easy 3D bounding box creation and extension in depth
+
+We want a _collections_ of rectangles / bboxes.
+- rendering during drawing and during rotation
+- move existing rectangles
+- live view updating in 2nd window
+- Q: are they 2d or 3d ? 
+      - 3D required for volume rendering in 2nd window / 3D bbox annotations
+      - can infer 3D bbox from 2D using heuristics
+      
+
+## Tracking Mode
+
+- [ ] allow object to occlude tracking tails
+- [ ] manual tracking annotation in max projection view uses smart depth inference
+- [ ] extend tracks by dragging mouse with right hand and tapping "space" with left to advance time point.
+      - [ ] use same workflow for moving bounding boxes through time.
+
+
+
+
 
 # Bugs
 
