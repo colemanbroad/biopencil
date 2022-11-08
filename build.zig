@@ -7,8 +7,9 @@ pub fn build(b: *Builder) void {
     // const target = b.standardTargetOptions(.{});
 
     {
-        const exe = b.addExecutable("clbridge", "src/clbridge.zig");
+        const exe = b.addExecutable("biopencil", "src/biopencil.zig");
         exe.setBuildMode(mode);
+
         exe.addIncludeDir("/usr/local/include/"); // tiff.h
         exe.addIncludeDir("libs/include/"); // CL/opencl.h
         exe.linkFramework("OpenCL");
@@ -18,7 +19,7 @@ pub fn build(b: *Builder) void {
     }
 
     {
-        const exe = b.addTestExe("clbridge-test", "src/clbridge.zig");
+        const exe = b.addTestExe("biopencil-test", "src/biopencil.zig");
         // exe.addLibraryPath("/usr/local/lib"); (automatically linked ???)
         exe.addIncludeDir("/usr/local/include/"); // tiff.h (required)
         exe.addIncludeDir("libs/include/"); // CL/opencl.h
