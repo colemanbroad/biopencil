@@ -209,9 +209,179 @@ This is in addition to modes for tasks like tracking, segmentation, spot countin
 Different image semantics: nuclear marker, membrane marker, u16 object labels, pixelwise labels, 
 generic fluorescence, histology rgb?
 
+# comptime vs runtime polymorphism
+
+How many times does your code need to pass through the compiler beofore it is executable by machine?
+running commands that have already been compiled. Each command is a small program.
+
+The comptime vs runtime distinction makes us think about DAGs of expressions / values. 
+What expressions can we evalute given the values that we have?
+What expressions depend on unknowns?
+If a value can only be known at runtime then it's a runtime value.
+The parts of the language that are available at runtime are different from the parts availabe at comptime!
+We can only use the allocator at runtime? 
+`comptime_int` is a type that only exist at comptime.
+We can only do loop-unrolling 
+
+- Comptime code: it has all the information that it needs to be evalua
+Comptime code is interpretable at compile time. There is enough information to evaluate statements and expressions.
+Runtime code is whatever can't be evaluated at compile time because it has a runtime-only dependency (e.g. user input).
+
+JIT compilation is using the power of the compiler at runtime, once we know more about some of the values in our code.
+This means we can get real array types with runtime known length.
+This means we have to be able to run the compiler at runtime! This means our compiler must ship with our executable!
+This is the biggest downside to JIT compilation. We have to ship the compiler (a massive runtime dependency) with our executable.
+This is probablly not worth it! 
+It would be nice to be able to do more dynamic stuff at runtime. 
+At the moment we can do compile-time duck typing to enable highly generic functions that are type checked.
+These functions are duplicated for each type signature of arguments used.
+An alternative is to do _runtime_ dispatch, where we assert that everything type checks, but instead of duplicating 
+the function for each type signature across all call sites we look up the right internal functions to call at runtime.
+
+Ideally we would be able to do type checking, generic function instantiation, specialized optimization, etc 
+SO FAST that we could do it at runtime! Then we continuously re-compile our code as we gain more and more information during the running of our program! 
+Instead, we do all the really expensive function lookup, optimization passes, etc during compilation, 
+and then we don't have to do anything tricky at runtime!
+A program "having a runtime" means that the compiler inserts it's own code into our code!
+Not knowing where or what will be inserted makes it harder to reason about performance and control flow.
+
+JIT compilation essentially 
+
+At the moment to do dynamic dispatch we have to create an interface as documented in `Allocator.zig` and `Random.zig`.
+These interfaces are initialized with `Interface.init(ptr,vtable)` and the pointer is type-erased cast to `*anyopaque` and the vtable is one more many functions which depend on that `*anyopaque` pointer type (methods of that type).
+
+How is this different from compile-time dispatch (which duplicates the function body for each input type)?
+With interfaces we get a new interface type. Functions that depend on this type don't have to be duplicated,
+because there is only one type the function sees! To create the interface we generate a _new_ type, then essentially
+cast it to the interface, which compresses multiple types into one.
+
+Does ZLS know where our method is implemented? or does it just point to the generaic interface's method?
+At definition it has no idea who's calling. At call site it has no idea which method we want to jump to.
+This is annoying. If all our code uses generic interfaces, then we rarely jump to real method implementations.
+
+When we compile down to an executable object file there are `.text` (code) and `.data` sections...
+
+- [github: vtables in zig? ](https://github.com/ziglang/zig/issues/130)
+- [github: comptime interfaces in zig](https://github.com/ziglang/zig/issues/1268)
+- [tutorial: dynamic polymorphism in zig](https://revivalizer.xyz/post/the-missing-zig-polymorphism-reference/)
+- [github: Alex Nask's Interface code](https://github.com/alexnask/interface.zig)
+- [gist: Alex Nask's Interface code (OLD)](https://gist.github.com/alexnask/1d39fbc01b42ce2b5b628828b6d1fb46)
+- [Alex Nask's YouTube talk](https://www.youtube.com/watch?v=AHc4x1uXBQE&ab_channel=ZigSHOWTIME)
+
+So does this Interface approach to runtime polymorphism allow us to write _precompiled libraries_ that 
+have our Interface in the exposed API? Is this another advantage over functions which are generic taking an `anytype`?
+
+- [ ] fix the bug in `reference/interface.zig` that causes printing random memory.
 
 
-# Mouse controls / view
+# Trees, Graphs, and Perfect Hash
+
+Arrays are just efficiently packed perfect hash of positive integers.
+The positive ints written in binary of length N are a description of a path down a binary tree to a node at layer N.
+
+Decimal `13` is binary 8 + 4 + 1 = `0b1101`.
+Each binary digit tells us `left` or `right` as we descend a binary tree, making binary numbers length N equivalent to a Path.
+We have to keep leading zeros. `0b001101` is equivalent to `0b1101` as a number, but not the same path!
+With the right [perfect hash](https://en.wikipedia.org/wiki/Perfect_hash_function) we can map an arbitrary Path description to a unique memory location.
+Further, if our hash has collisions we can use buckets. 
+Then we can accept the number of existing items in each bucket as an additional parameter, making a perfect hash again.
+FAIL: Then the representation depends on the order of insertion.
+
+This is only useful if we know the positions of elements won't change.
+If our hash depends on the relationship between nodes in graph/tree then it is likely to break when the graph changes.
+Static binary tree must remain static.
+But sometimes we must explore the data to find the element we want.
+Traversing multiple pointer (index) indirections may be necessary.
+It's more efficient to store elements in array and use indices than to store elements in Allocator and use pointers.
+
+A tree can be represented in memory [in many ways](https://stackoverflow.com/questions/2675756/efficient-array-storage-for-binary-tree)
+
+- store mapping between node ids (edge list `(i,j),(i,k),...` or array where `arr[i]=n` means `n` points to `i`)
+- dense representations without ids:
+      + LISP syntax clearly represents an AST.
+      + depth-first traversal with special symbols to mark e.g. "no child"
+      + special case: store structure of tree only. data is just `1` marking node as "present".
+- sparse representations without ids:
+      + binary tree can has a perfect hash that is dense for complete tree i.e. bredth first traversal without compressing empty nodes. see also [Binary Heap](https://en.wikipedia.org/wiki/Binary_heap). The children of node stored at `i` are stored at `2i,2i+1`.
+
+In most cases we probably just want to store 
+1. node labels →  dense id's `[1..n]`
+2. graph of dense id's (edge list or parent array)
+3. dense id's → node data (all node info stored separately here)
+
+OR we simply store `[]Elem` where `const Elem = struct {parent:u16, child1:u16, child2:u16, data:Data}`.
+This can take the same form on disk and in RAM.
+
+Serialization is not some special case we only think about when saving to disk.
+How objects are laid out in memory is serialization.
+
+
+```zig
+const Step = enum {left,right,straight};
+const Path = [10]Step;
+fn getElem(tr:[]Elem, pa:Path) Elem {
+      const idx = perfectHash(pa);
+      return tr[idx];
+}
+```
+
+
+Explicitly representing Paths also unlocks things like _relative locations_ of Elements in the tree.
+e.g. we can have `const relative_path:RelPath = path_1 - path_2;` and `const next_elem:Elem = path_1 + relative_path;`.
+
+But the point of trees is that they can easily grow and shrink... And we can easily add and remove nodes anywhere...
+This is easiest is we simply pass the work of assigning memory to `malloc`... Maybe this is even fast if we use a FixedBufferAllocator... But we still have to include pointers at every node... 
+Is there a middle ground? 
+
+
+```
+1 2 3 ↑ 4 5 ↑ ↑ ↑ 6 ↑ 7
+
+-----------------------
+
+          ┌────┐                
+          │ 1  │                
+          └────┘                
+             │                  
+       ┌─────┴────┬──────────┐  
+       │          │          │  
+       ▼          ▼          ▼  
+    ┌────┐     ┌────┐     ┌────┐
+    │ 2  │     │ 6  │     │ 7  │
+    └────┘     └────┘     └────┘
+       │                        
+   ┌───┴─────┐                  
+   │         ▼                  
+   ▼      ┌────┐                
+┌────┐    │ 4  │                
+│ 3  │    └────┘                
+└────┘       │                  
+             └───┐              
+                 ▼              
+              ┌────┐            
+              │ 5  │            
+              └────┘            
+
+```
+- write lisp! `(1 (2 3 (4 5)) 6 7)` . Use special markers to begin / end subtrees. this is flexible enough to be used with trees of any shape.
+- dense array mapping index to parent. _must assign unique positive integer ID to nodes_. This is not necessary with 
+```
+parent   1 2 3 4 5 6 7
+child    0 1 2 2 4 1 1
+```
+- matrix of edges {0,1}^NxN for N nodes. 
+- edgelist `(1,2), (2, 4), (1, 5), (2, 5), ... ` 
+- So if we have to do e.g. a depth-first-search. How do we do this in the tree-
+
+
+There are so many ways of representing graphs / trees.
+It's like rotations. There are so many ways of representing rotations.
+And these are really simple objects! But also highly flexible objects.
+
+
+
+
+# Mouse controls / view / 3D Rotations
 
 Idea to use spherical coordinates from [here](https://quaternions.online/).
 R/gamedev also recommends spherical coords [here](https://www.reddit.com/r/gamedev/comments/16zejj/3d_camera_orbit_drag_zoom/).
@@ -275,12 +445,15 @@ Some of these deps live in macos Frameworks, e.g. `Cocoa`.
 I can static link `libjpeg` and dynamic link (a lot of) Frameworks.
 This in theory allows distributing binaries that don't require installing 3rd party libs.
 
-
-
 __But I'm not using these dependencies!__
 Unnecessary dependencies shrink viable set of target systems.
 
 Q1: Is there a way to static build that avoids unnecessary dependencies?
+
+- [How to remove unused C/C++ symbols with GCC and ld?](https://stackoverflow.com/questions/6687630/how-to-remove-unused-c-c-symbols-with-gcc-and-ld)
+- [Remove dead code when linking static library into dynamic library](https://stackoverflow.com/questions/50881619/remove-dead-code-when-linking-static-library-into-dynamic-library)
+- 
+
 Q2: Does building from source allow me to avoid these dependencies?
 
 - [attempting backwards compatibility on macos despite dynamic linking](https://stackoverflow.com/questions/15091105/confusion-of-how-to-make-osx-app-backward-compatible-how-to-test-them)
@@ -352,20 +525,11 @@ Of course there may be multiple intersection points... We have to disambiguate t
 
 We want a _collections_ of rectangles / bboxes.
 - rendering during drawing and during rotation
-- move existing rectangles
-- live view updating in 2nd window
+- [ ] move existing rectangles
+- [ ] live view updating in 2nd window
 - Q: are they 2d or 3d ? 
-      - 3D required for volume rendering in 2nd window / 3D bbox annotations
-      - can infer 3D bbox from 2D using heuristics
-      
-
-## Tracking Mode
-
-- [ ] allow object to occlude tracking tails
-- [ ] manual tracking annotation in max projection view uses smart depth inference
-- [ ] extend tracks by dragging mouse with right hand and tapping "space" with left to advance time point.
-      - [ ] use same workflow for moving bounding boxes through time.
-
+      - [ ] 3D required for volume rendering in 2nd window / 3D bbox annotations
+      - [ ] can infer 3D bbox from 2D using heuristics
 
 
 
