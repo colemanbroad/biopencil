@@ -799,7 +799,7 @@ const app = struct {
     var running = true;
     const ViewMode = enum { view, loop, rect };
     var loop_draw_mode: ViewMode = .view;
-    var rectmode: enum { blue, red } = .red;
+    var rectmode: enum { blue , resize} = .blue;
 };
 
 test "test window creation" {
@@ -911,34 +911,27 @@ const Window = struct {
         cc.SDL_UnlockSurface(this.surface);
     }
 
-    // inline fn get(this: This, x: usize, y: usize) *[4]u8 {
-    //     return this.pix.get(x, y);
-    //     // return &this.pix[this.nx * y + x];
-    // }
-
     fn setPixelsFromRectangle(this: *This, img: Img2D([4]u8), r: Rect) void {
         _ = cc.SDL_LockSurface(this.surface);
-        // var x_idx: u32 = 0;
-        // var y_idx: u32 = 0;
-        // print("r0 = {any}\n", .{r0});
 
-        // assert(0 <= r.r0[0] + r.dr[0] <= this.nx);
-        assert(r.xmax - r.xmin == this.nx);
-        assert(r.ymax - r.ymin == this.ny);
-        // while (y_idx < this.ny) : (y_idx += 1) {
-        //     while (x_idx < this.nx) : (x_idx += 1) {
-        // const idx = this.nx * y_idx + x_idx;
+        const x_zoom = @intToFloat(f32, this.nx) / @intToFloat(f32, r.xmax - r.xmin);
+        const y_zoom = @intToFloat(f32, this.ny) / @intToFloat(f32, r.ymax - r.ymin);
+
         for (this.pix.img) |*w, i| {
-            const x_idx = i % this.nx;
-            const y_idx = @divFloor(i, this.nx); // % this.ny;
-            const v = img.get(x_idx + r.xmin, y_idx + r.ymin).*;
-            // this.pix.get(x_idx, y_idx).* = v;
+            const x_idx = r.xmin + divFloorIntByFloat(i % this.nx, x_zoom);
+            const y_idx = r.ymin + divFloorIntByFloat(@divFloor(i, this.nx), y_zoom);
+            const v = img.get(x_idx, y_idx).*;
             w.* = v;
-            // }
         }
         cc.SDL_UnlockSurface(this.surface);
     }
 };
+
+fn divFloorIntByFloat(numerator: anytype, denom: anytype) @TypeOf(numerator) {
+    const T1 = @TypeOf(numerator);
+    const T2 = @TypeOf(denom);
+    return @floatToInt(T1, @intToFloat(T2, numerator) / denom);
+}
 
 const I2 = @Vector(2, i32);
 const Rect2 = struct { r0: I2, dr: I2 };
@@ -958,6 +951,12 @@ fn sortRect(r0: Rect) Rect {
     return .{ .xmin = min(r0.xmin, r0.xmax), .xmax = max(r0.xmin, r0.xmax), .ymin = min(r0.ymin, r0.ymax), .ymax = max(r0.ymin, r0.ymax), .sorted = true };
 }
 
+fn abs(num: anytype) @TypeOf(num) {
+    // const T = @TypeOf(num);
+    // comptime assert(im.isin())
+    if (num < 0) return -num;
+    return num;
+}
 
 ///
 ///  Load and Render TIFF with OpenCL and SDL.
@@ -1028,7 +1027,7 @@ pub fn main() !u8 {
     // small window
     var windy_ortho_small = try Window.init(256, 256);
     // var blue_rectangle = Rect{ .xmin = 0, .ymin = 0, .xmax = 256, .ymax = 256, .sorted = true };
-    var blue_rectangle = Rect2{ .r0 = .{ 0, 0 }, .dr = .{ 256, 256 } };
+    var blue_rectangle = Rect2{ .r0 = .{ 0, 0 }, .dr = .{ 128, 128 } };
 
     // 3D window
     var windy = try Window.init(nx, ny);
@@ -1155,10 +1154,10 @@ pub fn main() !u8 {
                         },
                         cc.SDLK_r => {
                             app.loop_draw_mode = .rect;
-                            app.rectmode = .red;
-                        },
-                        cc.SDLK_b => {
-                            app.rectmode = .blue;
+                            app.rectmode = switch (app.rectmode) {
+                                 .blue => .resize,
+                                 .resize => .blue,
+                            };
                         },
                         cc.SDLK_x => blk: {
                             // app.loop_draw_mode = .rect;
@@ -1239,26 +1238,27 @@ pub fn main() !u8 {
                             loops.temp_screen_loop_len += 1;
                         },
                         .rect => blk2: {
-                            // a
+
                             if (event.motion.windowID != windy_ortho.windowID) break :blk2;
-                            const x0 = rect_being_drawn_vertex0[0];
-                            const y0 = rect_being_drawn_vertex0[1];
 
                             // windy.setPixels(d_output.img); // bounding box already written to d_output.img!
                             windy_ortho.setPixels(windy_ortho_projection_rgba.img);
                             switch (app.rectmode) {
-                                .red => {
-                                    // const red_rectangle = sortRect(Rect{ .xmin = x0, .ymin = y0, .xmax = px, .ymax = py });
-                                    const dr0 = @intCast(i32, px) - @intCast(i32, x0);
-                                    const dr1 = @intCast(i32, py) - @intCast(i32, y0);
-                                    const red_rectangle = Rect2{ .r0 = .{ x0, y0 }, .dr = .{ dr0, dr1 } };
-                                    drawRectangle2(windy_ortho, red_rectangle, colors.red);
-                                },
                                 .blue => {
                                     blue_rectangle.r0 = .{ px, py };
-                                    blue_rectangle.r0 -= I2{ 128, 128 };
-                                    blue_rectangle.r0[0] = std.math.clamp(blue_rectangle.r0[0], 0, windy_ortho.nx - 256 - 1);
-                                    blue_rectangle.r0[1] = std.math.clamp(blue_rectangle.r0[1], 0, windy_ortho.ny - 256 - 1);
+                                    const x_width = abs(blue_rectangle.dr[0]);
+                                    const y_width = abs(blue_rectangle.dr[1]);
+                                    const x_halfwidth = @divFloor(x_width, 2);
+                                    const y_halfwidth = @divFloor(y_width, 2);
+                                    blue_rectangle.r0 -= I2{ x_halfwidth, y_halfwidth };
+                                    blue_rectangle.r0[0] = std.math.clamp(blue_rectangle.r0[0], 0, @intCast(i32, windy_ortho.nx) - x_width - 1);
+                                    blue_rectangle.r0[1] = std.math.clamp(blue_rectangle.r0[1], 0, @intCast(i32, windy_ortho.ny) - y_width - 1);
+                                    drawRectangle2(windy_ortho, blue_rectangle, colors.blue);
+                                    windy_ortho_small.setPixelsFromRectangle(windy_ortho_projection_rgba, rect2ToRect(blue_rectangle));
+                                    try windy_ortho_small.update();
+                                },
+                                .resize => {
+                                    blue_rectangle.dr = I2{px,py} - blue_rectangle.r0;
                                     drawRectangle2(windy_ortho, blue_rectangle, colors.blue);
                                     windy_ortho_small.setPixelsFromRectangle(windy_ortho_projection_rgba, rect2ToRect(blue_rectangle));
                                     try windy_ortho_small.update();
