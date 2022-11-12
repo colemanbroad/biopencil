@@ -730,7 +730,7 @@ fn embedLoopAndSave(loop: ScreenLoop, view: View, depth_buffer: Img2D(f32)) !voi
     // const the_zmean = zmean(filtered_positions) ;
     // for (filtered_positions) |*v| v.*[2] = the_zmean;
 
-    var floatPosActual = loops.getNewSlice(@intCast(u16, vertex_count));
+    var floatPosActual = loops.addNewSlice(@intCast(u16, vertex_count));
     for (floatPosActual) |*v, i| v.* = filtered_positions[i];
 }
 
@@ -748,7 +748,7 @@ fn drawLoops(d_output: Img2D([4]u8), view: View) void {
     // then we can draw them connected with lines.
     var i: u16 = 0;
     while (i < loops.volume_loop_max_index) : (i += 1) {
-        const vl = loops.getVolumeLoop(i);
+        const vl = loops.getVolumeLoopAtIndex(i);
         const sl = volumeLoop2ScreenLoop(view, vl);
         drawScreenLoop(sl, d_output);
     }
@@ -764,14 +764,14 @@ const loops = struct {
     // Buffer that stores 3D coordinates of knots that form Loops.
     // Works like a simple memory allocator for []V3 slices.
     var volume_loop_mem: [1000 * 100][3]f32 = undefined; // 1000 loops * 100 avg-loop-length
-    var volume_loop_indices = [_]usize{0} ** 1000; // up to 100 indices into loop memory
+    var volume_loop_indices = [_]usize{0} ** 1000; // up to 1000 indices into loop memory
     var volume_loop_max_index: usize = 0; // number of indices currently in use
 
-    pub fn getVolumeLoop(n: u16) VolumeLoop {
+    pub fn getVolumeLoopAtIndex(n: u16) VolumeLoop {
         return volume_loop_mem[volume_loop_indices[n]..volume_loop_indices[n + 1]];
     }
 
-    pub fn getNewSlice(nitems: u16) [][3]f32 {
+    pub fn addNewSlice(nitems: u16) [][3]f32 {
         const idx0 = volume_loop_indices[volume_loop_max_index];
         const idx1 = idx0 + nitems;
         volume_loop_indices[volume_loop_max_index + 1] = idx1;
@@ -779,10 +779,46 @@ const loops = struct {
         return volume_loop_mem[idx0..idx1];
     }
 
+    pub fn save(name: []const u8) !void {
+        const file = try std.fs.cwd().createFile(name, .{});
+        defer file.close();
+        const writer = file.writer();
+
+        try writer.writeIntLittle(usize, volume_loop_max_index);
+        try writer.writeAll(std.mem.sliceAsBytes(&volume_loop_indices));
+        try writer.writeAll(std.mem.sliceAsBytes(&volume_loop_mem));
+    }
+
+    /// returns false if file doesn't exist
+    pub fn load(name: []const u8) !void {
+        const file = try std.fs.cwd().openFile(name, .{});
+        defer file.close();
+        const reader = file.reader();
+
+        volume_loop_max_index = try reader.readIntLittle(usize);
+        for (volume_loop_indices) |*v| v.* = try reader.readIntLittle(usize);
+        _ = try reader.readAll(std.mem.sliceAsBytes(&volume_loop_mem));
+
+        // return error.Success;
+        // return true;
+        // try writer.writeIntLittle(usize,temp_screen_loop_len);
+        // try writer.writeAll(std.mem.sliceAsBytes(&volume_loop_indices));
+        // try writer.writeAll(std.mem.sliceAsBytes(&volume_loop_mem));
+    }
+
     // pub fn handleMouseDown() {}
     // pub fn handleMouseUp() {}
     // pub fn handleMouseMove() {}
 };
+
+test "test read write loops" {
+    const s1 = loops.addNewSlice(100);
+    for (s1) |*v| v.* = .{ 0.9, 0.8, 0.7 };
+    // const name = "testfile.loops";
+    try loops.save("testfile.loops");
+    _ = try loops.load("testfile.loops");
+    try loops.save("testfile2.loops");
+}
 
 const rects = struct {
     // var temp_screen_rect: [2]U2 = undefined;
@@ -799,7 +835,7 @@ const app = struct {
     var running = true;
     const ViewMode = enum { view, loop, rect };
     var loop_draw_mode: ViewMode = .view;
-    var rectmode: enum { blue , resize} = .blue;
+    var rectmode: enum { blue, resize } = .blue;
 };
 
 test "test window creation" {
@@ -1110,11 +1146,20 @@ pub fn main() !u8 {
     };
     print("mima of d_output.img {any}\n", .{mima2});
 
-    // Update window
-    addBBox(d_output, view);
 
+    // Update window
+    const err = loops.load("loopfile.loops");
+    if (err) |_| {
+        print("File Found . Loading Loops . \n", .{});
+        drawLoops(d_output,view);
+    } else |e| {
+        print("File Not Found? {!} \n", .{e});
+    }
+
+    addBBox(d_output, view);
     windy.setPixels(d_output.img);
     try windy.update();
+
 
     // done with startup . time to run the app
 
@@ -1144,7 +1189,13 @@ pub fn main() !u8 {
                 cc.SDL_KEYDOWN => {
                     switch (event.key.keysym.sym) {
                         cc.SDLK_q => {
+                            print("Saving... volume_loop_max_index is : {d} \n",.{loops.volume_loop_max_index});
+                            try loops.save("loopfile.loops");
                             app.running = false;
+                        },
+                        cc.SDLK_s => {
+                            print("Saving... volume_loop_max_index is : {d} \n",.{loops.volume_loop_max_index});
+                            try loops.save("loopfile.loops");
                         },
                         cc.SDLK_d => {
                             app.loop_draw_mode = .loop;
@@ -1155,8 +1206,8 @@ pub fn main() !u8 {
                         cc.SDLK_r => {
                             app.loop_draw_mode = .rect;
                             app.rectmode = switch (app.rectmode) {
-                                 .blue => .resize,
-                                 .resize => .blue,
+                                .blue => .resize,
+                                .resize => .blue,
                             };
                         },
                         cc.SDLK_x => blk: {
@@ -1238,7 +1289,6 @@ pub fn main() !u8 {
                             loops.temp_screen_loop_len += 1;
                         },
                         .rect => blk2: {
-
                             if (event.motion.windowID != windy_ortho.windowID) break :blk2;
 
                             // windy.setPixels(d_output.img); // bounding box already written to d_output.img!
@@ -1258,7 +1308,7 @@ pub fn main() !u8 {
                                     try windy_ortho_small.update();
                                 },
                                 .resize => {
-                                    blue_rectangle.dr = I2{px,py} - blue_rectangle.r0;
+                                    blue_rectangle.dr = I2{ px, py } - blue_rectangle.r0;
                                     drawRectangle2(windy_ortho, blue_rectangle, colors.blue);
                                     windy_ortho_small.setPixelsFromRectangle(windy_ortho_projection_rgba, rect2ToRect(blue_rectangle));
                                     try windy_ortho_small.update();
