@@ -10,8 +10,8 @@ pub fn build(b: *Builder) void {
         const exe = b.addExecutable("biopencil", "src/biopencil.zig");
         exe.setBuildMode(mode);
 
-        exe.addIncludeDir("/usr/local/include/"); // tiff.h
-        exe.addIncludeDir("libs/include/"); // CL/opencl.h
+        exe.addIncludePath("/usr/local/include/"); // tiff.h
+        exe.addIncludePath("libs/include/"); // CL/opencl.h
         exe.linkFramework("OpenCL");
         exe.linkSystemLibrary("tiff");
         exe.linkSystemLibrary("SDL2");
@@ -21,12 +21,12 @@ pub fn build(b: *Builder) void {
     {
         const exe = b.addTestExe("biopencil-test", "src/biopencil.zig");
         // exe.addLibraryPath("/usr/local/lib"); (automatically linked ???)
-        exe.addIncludeDir("/usr/local/include/"); // tiff.h (required)
-        exe.addIncludeDir("libs/include/"); // CL/opencl.h
+        exe.addIncludePath("/usr/local/include/"); // tiff.h (required)
+        exe.addIncludePath("libs/include/"); // CL/opencl.h
         exe.linkFramework("OpenCL");
         exe.linkSystemLibrary("tiff");
         exe.linkSystemLibrary("SDL2");
-        // exe.setFilter("test tiff open float image");
+        exe.setFilter("test read write loops");
         // exe.setFilter("test TIFF vs raw speed");
         exe.install();
     }

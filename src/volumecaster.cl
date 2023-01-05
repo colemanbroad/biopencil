@@ -166,12 +166,12 @@ __kernel void max_project_float(
                   read_only image3d_t volume,
                   global uchar4 *d_output,
                   global float *d_zbuffer,
-                  global read_only uchar4 *colormap,
-                  read_only uint Nx, 
-                  read_only uint Ny,
-                  read_only float2 global_minmax,
-                  read_only View view,
-                  read_only ushort3 volume_dims
+                  global uchar4 *colormap,
+                  uint Nx, 
+                  uint Ny,
+                  float2 global_minmax,
+                  View view,
+                  ushort3 volume_dims
                   )
 {
 
@@ -332,7 +332,7 @@ __kernel void max_project_float(
   // float alphaVal = clamp(maxVal,0.f,1.f);
   
   // d_output[idx] = convert_uchar4(temp);
-  uchar4 color = colormap[uchar(255*zDepth)];
+  uchar4 color = colormap[ (uchar)(255*zDepth) ];
   uchar4 val;
   val = convert_uchar4(convert_float4(color) * float4(maxVal));
   // val = (uchar4){255,maxVal,maxVal,255};

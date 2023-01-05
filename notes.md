@@ -201,14 +201,6 @@ res = (a-3)(a+3)
 ```
 
 
-# Modal Editing
-
-Modal editing should include modes for editing LABEL IMAGES / RAW FLUORESCENCE / etc !
-The way we select objects, etc should know the difference between image types.
-This is in addition to modes for tasks like tracking, segmentation, spot counting, etc.
-Different image semantics: nuclear marker, membrane marker, u16 object labels, pixelwise labels, 
-generic fluorescence, histology rgb?
-
 # comptime vs runtime polymorphism
 
 How many times does your code need to pass through the compiler beofore it is executable by machine?
@@ -465,6 +457,32 @@ Apparently [it is common](https://stackoverflow.com/questions/844819/how-to-stat
 [Pure static linking including all Frameworks is not possible.](https://developer.apple.com/library/archive/qa/qa1118/_index.html)
 
 
+## Modal Editing
+
+Proposed Modes
+
+1. View and Explore: No annotations can be created. Optimized for easy exploration. Mouse Drag on 3D view rotates. Can move rectangles around on 2D projection. Dragging corner of rectangle resizes it and changes zoom. We can add multiple rectangles? This sounds like adding an annotation. Are our viewing rectangles equivalent to bbox annotations?
+
+2. Label Images: Painting and relabel. Adjust boundaries.
+
+3. 3D Pencil annotation. Should be available in perspective and orthogonal projections. 
+
+- All annotations should be selectable. Easy creation, deletion, grouping, add metadata to annotations in bulk.
+- Modes for tasks? Spot counting, Tracking, Semantic Seg, Instance Seg, Mitosis Detection, etc ?
+- Or just some generic tools that are useful for many tasks? Pencil, Circle, Rectangle, Track. Labeling Annotations. 
+
+The way we select objects, etc should know the difference between image types.
+This is in addition to modes for tasks like tracking, segmentation, spot counting, etc.
+Different image semantics: nuclear marker, membrane marker, u16 object labels, pixelwise labels, 
+generic fluorescence, histology rgb?
+
+### Tracking Mode
+
+- [ ] allow object to occlude tracking tails
+- [ ] manual tracking annotation in max projection view uses smart depth inference
+- [ ] extend tracks by dragging mouse with right hand and tapping "space" with left to advance time point.
+      - [ ] use same workflow for moving bounding boxes through time.
+
 
 
 # Features
@@ -475,6 +493,7 @@ Apparently [it is common](https://stackoverflow.com/questions/844819/how-to-stat
 - [x] drawing with fw/bw 3D map 
 - [x] proper window size. has a max width, but otherwise is h/w proportional to x,y image size. anisotropy interpreted from image.
 - [x] connect two windows via draggable box
+- [ ] branch early on `mode` . move logic into mode-specific trees.
 - [ ] save anno to disk
 - [ ] Scroll through time. Live load of new data from disk / mem.
 - [ ] REPL interface with autocomplete to adjust params. access nested, internal structs. interactive.
@@ -485,12 +504,6 @@ Apparently [it is common](https://stackoverflow.com/questions/844819/how-to-stat
 - [ ] #perf Allow window resize without changing the cost of opencl projection (keep number of rays small), then upscale them efficiently (maybe also on GPU?) related to kernel chaining?!
 - [ ] #perf Dynamically adjust the quality of depth rendering while view is updating. (lower density sampling in X,Y,and Z) Still shots get higher quality?
 
-## Tracking Mode
-
-- [ ] allow object to occlude tracking tails
-- [ ] manual tracking annotation in max projection view uses smart depth inference
-- [ ] extend tracks by dragging mouse with right hand and tapping "space" with left to advance time point.
-      - [ ] use same workflow for moving bounding boxes through time.
 
 
 ## Loading data

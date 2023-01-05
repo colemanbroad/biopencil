@@ -384,10 +384,25 @@ pub fn Kernel(
             inline for (argtype) |argT, i| {
                 const arg = args[i];
                 const T = @TypeOf(arg);
-                const size = switch (@typeInfo(T)) {
-                    .Pointer => @sizeOf(std.meta.Elem(T)) * arg.len, // assume slice or array
-                    else => @sizeOf(T),
-                };
+                // @compileLog("Type is: ", T);
+                const info = @typeInfo(T);
+
+                const size =
+                    if (info == .Pointer and info.Pointer.size == .Many)
+                    @sizeOf(std.meta.Elem(T)) * arg.len
+                else
+                    @sizeOf(T);
+
+                // const size = blk: {
+                //     @compileLog(info);
+                //     @compileLog();
+                //     if (info == .Pointer) {
+                //         if (info.Pointer.size == .Many) {
+                //             break :blk @sizeOf(std.meta.Elem(T)) * arg.len;
+                //         }
+                //     }
+                //     break :blk @sizeOf(T);
+                // };
 
                 switch (argT) {
                     .buffer_write_once, .buffer_write_everytime => {
@@ -395,17 +410,17 @@ pub fn Kernel(
                         try testForCLError(errCode);
                         errCode = cl.clEnqueueWriteBuffer(dcqp.command_queue, buffers[i], cl.CL_TRUE, 0, size, &arg[0], 0, null, null);
                         try testForCLError(errCode);
-                        errCode = cl.clSetKernelArg(kernel, i, @sizeOf(cl.cl_mem), &buffers[i]);
+                        errCode = cl.clSetKernelArg(kernel, i, @sizeOf(cl.cl_mem), buffers[i]);
                         try testForCLError(errCode);
                     },
                     .buffer_read_everytime => {
                         buffers[i] = cl.clCreateBuffer(dcqp.ctx, cl.CL_MEM_READ_ONLY, size, null, &errCode);
                         try testForCLError(errCode);
-                        errCode = cl.clSetKernelArg(kernel, i, @sizeOf(cl.cl_mem), &buffers[i]);
+                        errCode = cl.clSetKernelArg(kernel, i, @sizeOf(cl.cl_mem), buffers[i]);
                         try testForCLError(errCode);
                     },
                     else => {
-                        errCode = cl.clSetKernelArg(kernel, i, size, &arg);
+                        errCode = cl.clSetKernelArg(kernel, i, size, arg);
                         try testForCLError(errCode);
                     },
                 }
@@ -435,10 +450,18 @@ pub fn Kernel(
             inline for (argtype) |argT, i| {
                 const arg = args[i];
                 const T = @TypeOf(arg);
-                const size = switch (@typeInfo(T)) {
-                    .Pointer => @sizeOf(std.meta.Elem(T)) * arg.len, // assume slice or array
-                    else => @sizeOf(T),
-                };
+                const info = @typeInfo(T);
+
+                const size =
+                    if (info == .Pointer and info.Pointer.size == .Many)
+                    @sizeOf(std.meta.Elem(T)) * arg.len
+                else
+                    @sizeOf(T);
+
+                // const size = switch (@typeInfo(T)) {
+                //     .Pointer => @sizeOf(std.meta.Elem(T)) * arg.len, // assume slice or array
+                //     else => @sizeOf(T),
+                // };
 
                 switch (argT) {
                     .buffer_write_everytime => {
@@ -450,7 +473,7 @@ pub fn Kernel(
                     .nonbuf_write_everytime => {
                         // errCode = cl.clSetKernelArg(self.kernel, i, @sizeOf(cl.cl_mem), &self.buffers[i]);
                         // try testForCLError(errCode);
-                        errCode = cl.clSetKernelArg(self.kernel, i, size, &arg);
+                        errCode = cl.clSetKernelArg(self.kernel, i, size, arg);
                         try testForCLError(errCode);
                     },
                     else => {},
@@ -1104,11 +1127,11 @@ pub fn main() !u8 {
         d_output.img,
         d_zbuffer.img,
         colormap,
-        nx,
-        ny,
-        mima,
-        view,
-        volume_dims,
+        &nx,
+        &ny,
+        &mima,
+        &view,
+        &volume_dims,
     };
 
     const argtypes = &[_]ArgTypes{
@@ -1146,12 +1169,11 @@ pub fn main() !u8 {
     };
     print("mima of d_output.img {any}\n", .{mima2});
 
-
     // Update window
     const err = loops.load("loopfile.loops");
     if (err) |_| {
         print("File Found . Loading Loops . \n", .{});
-        drawLoops(d_output,view);
+        drawLoops(d_output, view);
     } else |e| {
         print("File Not Found? {!} \n", .{e});
     }
@@ -1159,7 +1181,6 @@ pub fn main() !u8 {
     addBBox(d_output, view);
     windy.setPixels(d_output.img);
     try windy.update();
-
 
     // done with startup . time to run the app
 
@@ -1182,19 +1203,19 @@ pub fn main() !u8 {
     while (app.running) {
         var event: cc.SDL_Event = undefined;
         while (cc.SDL_PollEvent(&event) != 0) {
-            switch (event.@"type") {
+            switch (event.type) {
                 cc.SDL_QUIT => {
                     app.running = false;
                 },
                 cc.SDL_KEYDOWN => {
                     switch (event.key.keysym.sym) {
                         cc.SDLK_q => {
-                            print("Saving... volume_loop_max_index is : {d} \n",.{loops.volume_loop_max_index});
+                            print("Saving... volume_loop_max_index is : {d} \n", .{loops.volume_loop_max_index});
                             try loops.save("loopfile.loops");
                             app.running = false;
                         },
                         cc.SDLK_s => {
-                            print("Saving... volume_loop_max_index is : {d} \n",.{loops.volume_loop_max_index});
+                            print("Saving... volume_loop_max_index is : {d} \n", .{loops.volume_loop_max_index});
                             try loops.save("loopfile.loops");
                         },
                         cc.SDLK_d => {
@@ -1335,7 +1356,7 @@ pub fn main() !u8 {
         windy.update_count += 1;
 
         // perform the render and update the window
-        args = .{ img_cl, d_output.img, d_zbuffer.img, colormap, nx, ny, mima, view, volume_dims };
+        args = .{ img_cl, d_output.img, d_zbuffer.img, colormap, &nx, &ny, &mima, &view, &volume_dims };
         try kernel.executeKernel(dcqp, args, &.{ nx, ny });
         // try blurfilter(gpa.allocator(), d_zbuffer);
 
