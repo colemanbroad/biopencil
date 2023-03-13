@@ -2,12 +2,17 @@ Get rendered image to appear in a SDL window.
 
 # Commands
 
-grep '^#' notes.md | sed 's/#/-/'  # Print a table of contents from `notes.md` 
+-- Print a table of contents from `notes.md` 
+grep '^#' notes.md | sed 's/#/-/'  
 
-Get rendered image to appear in a SDL window.
+-- Create demo.gif from a screen recording
+ffmpeg -ss 00:00:10.000 -i screen-recording.mov -pix_fmt rgb24 -r 10 -s 694x532 -t 00:00:10.000 demo.gif
+
+
 
 # Wed Sep 28 00:29:14 2022
 
+Get rendered image to appear in a SDL window.
 IT WORKS    IT WORKS    IT WORKS    IT WORKS    IT WORKS    IT WORKS    IT WORKS    IT WORKS    IT WORKS    IT WORKS    
 IT WORKS    IT WORKS    IT WORKS    IT WORKS    IT WORKS    IT WORKS    IT WORKS    IT WORKS    IT WORKS    IT WORKS    
 IT WORKS    IT WORKS    IT WORKS    IT WORKS    IT WORKS    IT WORKS    IT WORKS    IT WORKS    IT WORKS    IT WORKS    
@@ -553,6 +558,13 @@ We want a _collections_ of rectangles / bboxes.
 - [ ] `r.direc` needs rescaling by `view.anisotropy`. Use dot product?
 - [ ] make depth coloring use colors of equal luminance! blue is much darker than yellow!
 - [x] `/fisheye/training/ce_024/train_cp/pimgs/train1/pimg_211.tif`: "Sorry, can not handle images with IEEE floating-point samples."
+
+## Invalid Kernel on M1 mac
+
+- Error: CL_INVALID_KERNEL
+- Hypothesis: I'm instantiating the kernel with invalid arguments that happen to type check properly
+- Experiment: Can I instantiate a simpler kernel where I know args are valid ? 
+- Result: 
 
 # Zig Questions
 
