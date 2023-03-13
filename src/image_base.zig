@@ -120,7 +120,8 @@ pub fn Img3D(comptime T: type) type {
 test "test img3d save()" {
     {
         const img = try Img3D(f32).init(10, 11, 12);
-        for (img.img) |*v, i| v.* = @cos(@intToFloat(f32, i));
+        defer img.deinit();
+        for (img.img, 0..) |*v, i| v.* = @cos(@intToFloat(f32, i));
         try img.save("cosine.img");
         // const img2 = try Img3D(f32).load("cosine.img");
         // try expect(eql(f32, img.img, img2.img));
@@ -128,7 +129,8 @@ test "test img3d save()" {
 
     {
         const img = try Img3D([4]u8).init(10, 11, 12);
-        for (img.img) |*v, i| v.* = [4]u8{
+        defer img.deinit();
+        for (img.img, 0..) |*v, i| v.* = [4]u8{
             @intCast(u8, i % 255),
             @intCast(u8, (2 * i) % 255),
             @intCast(u8, (3 * i) % 255),
@@ -141,15 +143,18 @@ test "test img3d save()" {
 test "test img3d load()" {
     {
         const img = try Img3D(f32).init(10, 11, 12);
-        for (img.img) |*v, i| v.* = @cos(@intToFloat(f32, i));
+        defer img.deinit();
+        for (img.img, 0..) |*v, i| v.* = @cos(@intToFloat(f32, i));
         try img.save("cosine.img");
         const img2 = try Img3D(f32).load("cosine.img");
+        defer img2.deinit();
         try expect(eql(f32, img.img, img2.img));
     }
 
     {
         const img = try Img3D([4]u8).init(10, 11, 12);
-        for (img.img) |*v, i| v.* = [4]u8{
+        defer img.deinit();
+        for (img.img, 0..) |*v, i| v.* = [4]u8{
             @intCast(u8, i % 255),
             @intCast(u8, (2 * i) % 255),
             @intCast(u8, (3 * i) % 255),
@@ -157,7 +162,8 @@ test "test img3d load()" {
         };
         try img.save("cosine.img");
         const img2 = try Img3D([4]u8).load("cosine.img");
-        for (img.img) |_, i| {
+        defer img2.deinit();
+        for (img.img, 0..) |_, i| {
             try expect(eql(u8, &img.img[i], &img2.img[i]));
         }
     }
@@ -172,11 +178,12 @@ test "test toBytes()" {
     file.close();
 
     const pix = try Img2D([4]u8).init(10, 11);
+    defer pix.deinit();
     for (pix.img) |*v| v.* = [4]u8{ 1, 2, 4, 8 };
     try std.fs.cwd().writeFile("pix.out", std.mem.asBytes(&pix));
 
     const pix2 = std.mem.bytesAsSlice(u8, try std.fs.cwd().readFileAlloc(al, "pix.out", 1600)); // SEGFAULT
-    _ = pix2;
+    defer al.free(pix2);
 
     var array_of_bytes: [@sizeOf(S)]u8 = undefined;
     _ = try std.fs.cwd().readFile("myfile.out", array_of_bytes[0..]);
@@ -207,8 +214,10 @@ test "test toBytes()" {
 
 test "test imageBase. Img3D Generic" {
     var img = try al.alloc(f32, 50 * 100 * 200);
+    defer al.free(img);
     const a1 = Img3D(f32){ .img = img, .nz = 50, .ny = 100, .nx = 200 };
-    defer a1.deinit();
+    _ = a1;
+    // defer a1.deinit();
     const a2 = try Img3D(f32).init(50, 100, 200); // comptime
     defer a2.deinit();
     // print("{}{}", .{ a1.nx, a2.nx });
@@ -257,7 +266,8 @@ pub fn norm01(comptime T: type, img: []T) void {
 
 test "test norm()" {
     var pic = try Img2D(f32).init(100, 101);
-    for (pic.img) |*v, i| v.* = @intToFloat(f32, i % 255);
+    defer pic.deinit();
+    for (pic.img, 0..) |*v, i| v.* = @intToFloat(f32, i % 255);
     norm01(f32, pic.img);
     try expect(eql(f32, &minmax(f32, pic.img), &.{ 0.0, 1.0 }));
 }
@@ -287,17 +297,17 @@ pub fn saveU8AsTGA(data: []u8, h: u16, w: u16, name: []const u8) !void {
     // remove file if already exists
     // make path if it doesn't exist
 
-    const cwd = std.fs.cwd();
-    const resolved = try std.fs.path.resolve(al, &.{name});
-    defer al.free(resolved);
-    const dirname = std.fs.path.dirname(resolved);
+    // const cwd = std.fs.cwd();
+    // const resolved = try std.fs.path.resolve(al, &.{name});
+    // defer al.free(resolved);
+    // const dirname = std.fs.path.dirname(resolved);
 
     // const basename = std.fs.path.basename(resolved);
     // print("resolved : {s} \n" , .{resolved});
     // print("dirname : {s} \n" , .{dirname});
     // print("basename : {s} \n" , .{basename});
 
-    cwd.makePath(dirname.?) catch {};
+    // cwd.makePath(dirname.?) catch {};
     // cwd.createFile(sub_path: []const u8, flags: File.CreateFlags)
 
     // try std.fs.makeDirAbsolute(dirname.?);
@@ -306,12 +316,15 @@ pub fn saveU8AsTGA(data: []u8, h: u16, w: u16, name: []const u8) !void {
 
     // WARNING fails when `resolved` is an existing directory...
     // std.fs.deleteDirAbsolute(resolved) catch {};
-    std.fs.deleteFileAbsolute(resolved) catch {};
-    var out = std.fs.createFileAbsolute(resolved, .{ .exclusive = true }) catch unreachable;
-    defer out.close();
+    // std.fs.deleteFileAbsolute(resolved) catch {};
+    // var out = std.fs.createFileAbsolute(resolved, .{ .exclusive = true }) catch unreachable;
+    // defer out.close();
     // errdefer cwd.deleteFile(name) catch {};
 
-    var writer = out.writer();
+    var outfile = try std.fs.cwd().createFile(name, .{});
+    defer outfile.close();
+
+    var writer = outfile.writer();
 
     try writer.writeAll(&[_]u8{
         0, // ID length
@@ -492,7 +505,7 @@ fn minfilter(alo: std.mem.Allocator, img: Img2D(f32)) !void {
     defer alo.free(t);
     const deltas = [_]@Vector(2, i32){ .{ -1, 0 }, .{ 0, 1 }, .{ 1, 0 }, .{ 0, -1 }, .{ 0, 0 } };
 
-    for (s) |_, i| {
+    for (s, 0..) |_, i| {
         // const i = @intCast(u32,_i);
         var mn = s[i];
         const px = @Vector(2, i32){ @intCast(i32, i % nx), @intCast(i32, i / nx) };
@@ -506,7 +519,7 @@ fn minfilter(alo: std.mem.Allocator, img: Img2D(f32)) !void {
 
     // for (s) |_,i| {
     // }
-    for (img.img) |*v, i| {
+    for (img.img, 0..) |*v, i| {
         v.* = t[i];
     }
 }
@@ -520,7 +533,7 @@ fn blurfilter(alo: std.mem.Allocator, img: Img2D(f32)) !void {
     defer alo.free(t);
     const deltas = [_]@Vector(2, i32){ .{ -1, 0 }, .{ 0, 1 }, .{ 1, 0 }, .{ 0, -1 }, .{ 0, 0 } };
 
-    for (s) |_, i| {
+    for (s, 0..) |_, i| {
         // const i = @intCast(u32,_i);
         var x = @as(f32, 0); //s[i];
         const px = @Vector(2, i32){ @intCast(i32, i % nx), @intCast(i32, i / nx) };
@@ -534,7 +547,7 @@ fn blurfilter(alo: std.mem.Allocator, img: Img2D(f32)) !void {
 
     // for (s) |_,i| {
     // }
-    for (img.img) |*v, i| {
+    for (img.img, 0..) |*v, i| {
         v.* = t[i];
     }
 }

@@ -282,8 +282,8 @@ pub const DevCtxQueProg = struct {
         const cwd = try std.fs.cwd().openDir("src", .{});
         var prog_source = try al.alloc([:0]u8, files.len);
         defer al.free(prog_source);
-        inline for (files) |name, i| prog_source[i] = try cwd.readFileAllocOptions(al, name, 20_000, null, @alignOf(u8), 0);
-        defer inline for (files) |_, i| al.free(prog_source[i]);
+        inline for (files, 0..) |name, i| prog_source[i] = try cwd.readFileAllocOptions(al, name, 20_000, null, @alignOf(u8), 0);
+        defer inline for (files, 0..) |_, i| al.free(prog_source[i]);
         var program = cl.clCreateProgramWithSource(ctx, @intCast(cl.cl_uint, files.len), @ptrCast([*c][*c]const u8, prog_source), null, &errCode);
         try testForCLError(errCode);
 
@@ -381,7 +381,7 @@ pub fn Kernel(
 
             // Loop over the arguments we want to pass to the kernel. Set read/write flags
             // as appropriate. Create buffers, add data to buffers, pass buffers as kernel args.
-            inline for (argtype) |argT, i| {
+            inline for (argtype, 0..) |argT, i| {
                 const arg = args[i];
                 const T = @TypeOf(arg);
                 // @compileLog("Type is: ", T);
@@ -447,7 +447,7 @@ pub fn Kernel(
 
             // Loop over the arguments we want to pass to the kernel. Set read/write flags
             // as appropriate. Create buffers, add data to buffers, pass buffers as kernel args.
-            inline for (argtype) |argT, i| {
+            inline for (argtype, 0..) |argT, i| {
                 const arg = args[i];
                 const T = @TypeOf(arg);
                 const info = @typeInfo(T);
@@ -483,7 +483,7 @@ pub fn Kernel(
             errCode = cl.clEnqueueNDRangeKernel(dcqp.command_queue, self.kernel, @intCast(u32, nproc.len), null, &nproc[0], null, 0, null, null);
             try testForCLError(errCode);
 
-            inline for (argtype) |argT, i| {
+            inline for (argtype, 0..) |argT, i| {
                 switch (argT) {
                     .buffer_read_everytime => {
                         const arg = args[i];
@@ -502,7 +502,7 @@ pub fn Kernel(
         }
 
         pub fn deinit(self: Self) void {
-            for (self.buffers) |b, i| {
+            for (self.buffers, 0..) |b, i| {
                 // if (argtype[i] == 'x') continue;
                 switch (argtype[i]) {
                     .buffer_read_everytime, .buffer_write_everytime, .buffer_write_once => {
@@ -523,8 +523,22 @@ test "test DevCtxQueProg" {
     };
     var dcqp = try DevCtxQueProg.init(al, files);
     defer dcqp.deinit();
+
+    const img2d = try Img2D(f32).init(100, 101);
+    for (img2d.img) |*v| v.* = 0.753;
+
+    defer img2d.deinit();
+
+    const img2dptr = try img2CLImg(img2d, dcqp);
+
+    const kern = try Kernel("imgtest", &[3]ArgTypes{ .nonbuf_write_once, .nonbuf_write_once, .nonbuf_write_once }).init(dcqp, .{ &20, &20, img2dptr });
+    defer kern.deinit();
+
+    const result = kern.executeKernel(dcqp, .{ &20, &20, img2dptr }, &.{ 50, 50 });
+
     print("\n", .{});
     print("DevCtxQueProg:\n{any}\n", .{dcqp});
+    print("Result:\n{any}\n", .{result});
     print("\n", .{});
 }
 
@@ -665,7 +679,7 @@ pub fn readTIFF3D(al: std.mem.Allocator, name: []const u8) !Img3D(f32) {
     // } TIFFDataType;
     const pic = try Img3D(f32).init(meta.imagewidth, meta.imagelength, meta.n_directories);
     const n = @divExact(meta.bitspersample, 8);
-    for (pic.img) |*v, i| {
+    for (pic.img, 0..) |*v, i| {
         const bufbytes = buf[(n * i)..(n * (i + 1))];
 
         v.* = switch (meta.datatype) {
@@ -686,7 +700,7 @@ fn drawScreenLoop(sl: ScreenLoop, d_output: Img2D([4]u8)) void {
     // var pix = @ptrCast([*c][4]u8, surface.pixels.?);
     if (sl.len == 0) return;
 
-    for (sl) |pt, i| {
+    for (sl, 0..) |pt, i| {
         if (i == 0) continue;
         im.drawLineInBounds(
             [4]u8,
@@ -714,7 +728,7 @@ fn drawScreenLoop(sl: ScreenLoop, d_output: Img2D([4]u8)) void {
 /// Returns slice (ptr type) to existing memory in `loops.screen_loop`
 fn volumeLoop2ScreenLoop(view: View, vl: VolumeLoop) ScreenLoop {
     // loops.screen_loop.clearRetainingCapacity();
-    for (vl) |pt3, i| {
+    for (vl, 0..) |pt3, i| {
         loops.temp_screen_loop[i] = v22U2(pointToPixel(view, pt3));
         // loops.screen_loop.appendAssumeCapacity(v22U2(pointToPixel(view, pt3)));
     }
@@ -754,7 +768,7 @@ fn embedLoopAndSave(loop: ScreenLoop, view: View, depth_buffer: Img2D(f32)) !voi
     // for (filtered_positions) |*v| v.*[2] = the_zmean;
 
     var floatPosActual = loops.addNewSlice(@intCast(u16, vertex_count));
-    for (floatPosActual) |*v, i| v.* = filtered_positions[i];
+    for (floatPosActual, 0..) |*v, i| v.* = filtered_positions[i];
 }
 
 const colors = struct {
@@ -819,7 +833,7 @@ const loops = struct {
         const reader = file.reader();
 
         volume_loop_max_index = try reader.readIntLittle(usize);
-        for (volume_loop_indices) |*v| v.* = try reader.readIntLittle(usize);
+        for (&volume_loop_indices) |*v| v.* = try reader.readIntLittle(usize);
         _ = try reader.readAll(std.mem.sliceAsBytes(&volume_loop_mem));
 
         // return error.Success;
@@ -964,7 +978,7 @@ const Window = struct {
 
     fn setPixels(this: *This, buffer: [][4]u8) void {
         _ = cc.SDL_LockSurface(this.surface);
-        for (buffer) |v, i| {
+        for (buffer, 0..) |v, i| {
             this.pix.img[i] = v;
         }
         cc.SDL_UnlockSurface(this.surface);
@@ -976,7 +990,7 @@ const Window = struct {
         const x_zoom = @intToFloat(f32, this.nx) / @intToFloat(f32, r.xmax - r.xmin);
         const y_zoom = @intToFloat(f32, this.ny) / @intToFloat(f32, r.ymax - r.ymin);
 
-        for (this.pix.img) |*w, i| {
+        for (this.pix.img, 0..) |*w, i| {
             const x_idx = r.xmin + divFloorIntByFloat(i % this.nx, x_zoom);
             const y_idx = r.ymin + divFloorIntByFloat(@divFloor(i, this.nx), y_zoom);
             const v = img.get(x_idx, y_idx).*;
@@ -1160,7 +1174,7 @@ pub fn main() !u8 {
         var mn = [4]u8{ 0, 0, 0, 0 };
         var mx = [4]u8{ 0, 0, 0, 0 };
         for (d_output.img) |v| {
-            for (v) |vi, i| {
+            for (v, 0..) |vi, i| {
                 mn[i] = std.math.min(mn[i], vi);
                 mx[i] = std.math.max(mx[i], vi);
             }
@@ -1401,7 +1415,7 @@ fn drawRectangle(window: Window, r: Rect, color: [4]u8) void {
 fn intensityToRGBA(img: Img2D(f32)) !Img2D([4]u8) {
     const mima = im.minmax(f32, img.img);
     const res = try Img2D([4]u8).init(img.nx, img.ny);
-    for (img.img) |v, i| {
+    for (img.img, 0..) |v, i| {
         const v_rescaled = @floatToInt(u8, (v - mima[0]) / (mima[1] - mima[0]) * 255);
         res.img[i] = [4]u8{ v_rescaled, v_rescaled, v_rescaled, 255 };
     }
@@ -1410,7 +1424,7 @@ fn intensityToRGBA(img: Img2D(f32)) !Img2D([4]u8) {
 
 fn maxProjectionOrtho(img: Img3D(f32)) !Img2D(f32) {
     const res = try Img2D(f32).init(img.nx, img.ny);
-    for (img.img) |v, i| {
+    for (img.img, 0..) |v, i| {
         const x = i % img.nx;
         const y = @divFloor(i, img.nx) % img.ny; //
         // const z = @divFloor(i, img.nx * img.ny) & img.nz; // mod nz shouldn't be necessary
@@ -1433,7 +1447,7 @@ fn cmapCool() [256][4]u8 {
     const reds = piecewiseLinearInterpolation(256, &[_][3]f32{ .{ 0, 0, 0 }, .{ 1, 1, 1 } });
     const greens = piecewiseLinearInterpolation(256, &[_][3]f32{ .{ 0, 1, 1 }, .{ 1, 0, 0 } });
     const blues = piecewiseLinearInterpolation(256, &[_][3]f32{ .{ 0, 1, 1 }, .{ 1, 1, 1 } });
-    for (cmap) |*r, i| {
+    for (&cmap, 0..) |*r, i| {
         r.* = .{
             @floatToInt(u8, reds[i] * 255),
             @floatToInt(u8, greens[i] * 255),
@@ -1448,7 +1462,7 @@ fn cmapCool() [256][4]u8 {
 fn piecewiseLinearInterpolation(comptime n: u16, pieces: []const [3]f32) [n]f32 {
     var res = [_]f32{0} ** n;
     var k: usize = 0;
-    for (res) |*r, i| {
+    for (&res, 0..) |*r, i| {
         const x = @intToFloat(f32, i) / 255; // in [0,1] inclusive
         if (x > pieces[k + 1][0]) k += 1;
         const x0 = pieces[k][0];
@@ -1676,7 +1690,7 @@ pub fn boxImage() !Img3D(f32) {
     const nz = 34;
     var img = try Img3D(f32).init(nx, ny, nz);
 
-    for (img.img) |*v, i| {
+    for (img.img, 0..) |*v, i| {
         const iz = (i / (nx * ny)) % nz; // should never exceed 34
         const iy = (i / nx) % ny;
         const ix = i % nx;
@@ -1816,7 +1830,7 @@ pub fn matMulNNRowFirst(comptime n: u8, comptime T: type, left: [n * n]T, right:
     var result: [n * n]T = .{0} ** (n * n);
     assert(n < 128);
     comptime {
-        for (result) |*c, k| {
+        for (&result, 0..) |*c, k| {
             var i = (k / n) * n;
             var j = k % n;
             var m = 0;
@@ -1894,7 +1908,7 @@ test "test TIFF vs raw speed" {
     // does it help to use f16 ?
 
     const img3 = try Img3D(f16).init(img.nx, img.ny, img.nz);
-    for (img3.img) |*v, i| v.* = @floatCast(f16, img.img[i]);
+    for (img3.img, 0..) |*v, i| v.* = @floatCast(f16, img.img[i]);
 
     t1 = milliTimestamp();
     try img3.save("raw.img");
