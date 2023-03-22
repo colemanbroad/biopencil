@@ -1134,15 +1134,13 @@ pub fn reexecuteKernel(
 
     const global_workers = [2]usize{ nx, ny };
     const ndims = 2;
-    print("exec 1 \n", .{});
     e = cl.clEnqueueNDRangeKernel(dcqp.command_queue, kernel, ndims, null, &global_workers[0], null, 0, null, null);
-    print("exec 2 \n", .{});
 
     size_in_bytes = @sizeOf(std.meta.Elem(@TypeOf(d_output.img))) * d_output.img.len;
     e = cl.clEnqueueReadBuffer(dcqp.command_queue, buffers_1, cl.CL_TRUE, offset, size_in_bytes, &d_output.img[0], 0, null, null);
     try err(e);
 
-    print("buffer color is {d} \n", .{d_output.img[0]});
+    // print("buffer color is {d} \n", .{d_output.img[0]});
 
     size_in_bytes = @sizeOf(std.meta.Elem(@TypeOf(d_zbuffer.img))) * d_zbuffer.img.len;
     e = cl.clEnqueueReadBuffer(dcqp.command_queue, buffers_2, cl.CL_TRUE, offset, size_in_bytes, &d_zbuffer.img[0], 0, null, null);

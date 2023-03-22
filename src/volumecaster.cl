@@ -7,7 +7,6 @@
   mweigert@mpi-cbg.de
 
   Adapted for Zig + OpenCL starting Wed Oct  6 2021 [coleman.broaddus@gmail.com]
-  
 */
 
 int intersectBox3(float3 r_o, float3 r_d, float3 boxmin, float3 boxmax, float *tnear, float *tfar) {
@@ -54,8 +53,6 @@ inline float rand_int2(uint x, uint y, int start, int end) {
   float rnd = (a*1.0f)/(79197919);
   return (int)(start+rnd*(end-start));
 }
-
-
 
 // assumes row-first matrix layout
 float4 mult4(float M[16], float4 v){
@@ -128,39 +125,6 @@ Ray pix2Ray(uint2 pix , View view, uint idx) {
   return r;
 }
 
-
-// Tell me the value of the pixel at a certain location.
-__kernel void imgtest(
-  uint dx,
-  uint dy,
-  read_only image2d_t img
-  )
-{
-
-  uint x = get_global_id(0);
-  uint y = get_global_id(1);
-
-  int nx = get_image_width(img);
-  int ny = get_image_height(img);
-
-  float u = ((x + 0.5) / (float) nx); //*2.0f-1.0f;
-  float v = ((y + 0.5) / (float) ny); //*2.0f-1.0f;
-
-  // d_output[x + 10*y] = (float) (x*y);
-  // const sampler_t volumeSampler = CLK_NORMALIZED_COORDS_TRUE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_LINEAR;
-  const sampler_t volumeSampler = CLK_NORMALIZED_COORDS_TRUE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_NEAREST;
-
-  // printf("(%d,%d)",x,y);
-  
-  // const sampler_t volumeSampler = CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_LINEAR;
-
-  if (x==dx && y==dy){
-    float val = read_imagef(img, volumeSampler, (float2) {u,v}).x; // NOTE: pixels accessed by float values must be translated 1/2 pixel from int coordinates.
-    printf("x,y = %d & %d value = %f \n",x,y,val);
-    printf("u,v = %f & %f value = %f \n",u,v,val);
-  }
-}
-
 // Nx,Ny = width & height of output (also compute grid?)
 __kernel void max_project_float(
                   read_only image3d_t volume,
@@ -172,7 +136,7 @@ __kernel void max_project_float(
                   float2 global_minmax,
                   View view,
                   ushort3 volume_dims
-                  )
+                )
 {
 
   // clip boxes [normalized volume coords]
@@ -305,10 +269,10 @@ __kernel void max_project_float(
 
         currentVal = read_imagef(volume, volumeSampler, pos).x;
 
-        if (max(pos.x, max(pos.y,pos.z))>1.001) {
-          printf("currentVal = %6.3f \n", currentVal);
-          printf("pos = %6.3f %6.3f %6.3f %6.3f \n", pos.x , pos.y, pos.z, pos.w);
-        }
+        // if (max(pos.x, max(pos.y,pos.z))>1.001) {
+        //   printf("currentVal = %6.3f \n", currentVal);
+        //   printf("pos = %6.3f %6.3f %6.3f %6.3f \n", pos.x , pos.y, pos.z, pos.w);
+        // }
         // if (x==300 && y==300) {
         // }
         // currentVal = (maxVal == 0)?currentVal:(currentVal-clipLow)/(clipHigh-clipLow);
@@ -342,6 +306,9 @@ __kernel void max_project_float(
   d_zbuffer[idx] = maxValDepth * dt + tnear;
   // float4 temp = (float4){255,255,255,255} * float4(maxVal); // * float4(zDepth);
   // d_output[idx] = uchar4(maxVal*255);
+
+  // char stringfloat[1000] = {};
+  // sprintf(&stringfloat, "this is a string\n\n");
 
   return;
 }

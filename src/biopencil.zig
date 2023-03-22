@@ -735,8 +735,8 @@ pub fn main() !u8 {
                 cc.SDL_MOUSEMOTION => blk: {
                     if (app_mouse.mousedown == false) break :blk;
 
-                    const px = @intCast(u31, event.motion.x);
-                    const py = @intCast(u31, event.motion.y); // TODO ERROR: panic: attempt to cast negative value to unsigned integer
+                    const px = @intCast(u31, clip(event.motion.x, 0, nx));
+                    const py = @intCast(u31, clip(event.motion.y, 0, ny)); // TODO ERROR: panic: attempt to cast negative value to unsigned integer
 
                     // should never be null, we've already asserted `mousedown`
                     assert(app_mouse.mouse_location != null);
@@ -881,7 +881,7 @@ const V3 = @Vector(3, f32);
 const V2 = @Vector(2, f32);
 const U2 = @Vector(2, u32);
 
-pub const View = struct {
+pub const View = extern struct {
     view_matrix: [9]f32, // orthonormal
     front_scale: V3,
     back_scale: V3,
@@ -1122,6 +1122,12 @@ test "test lerp" {
 
 fn lerp(lo: f32, mid: f32, hi: f32, valLo: f32, valHi: f32) f32 {
     return valLo * (hi - mid) / (hi - lo) + valHi * (mid - lo) / (hi - lo);
+}
+
+fn clip(val: anytype, lo: @TypeOf(val), hi: @TypeOf(val)) @TypeOf(val) {
+    if (val < lo) return lo;
+    if (val > hi) return hi;
+    return val;
 }
 
 /// Requires XYZ order (or some rotation thereof)
