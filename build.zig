@@ -18,7 +18,8 @@ pub fn build(b: *Builder) void {
         // exe.setBuildMode(mode);
 
         exe.addIncludePath("/usr/local/include/"); // tiff.h
-        exe.addIncludePath("libs/include/"); // CL/opencl.h
+        // exe.addIncludePath("libs/include/"); // CL/opencl.h
+        // exe.addSystemIncludePath("/Library/Developer/CommandLineTools/SDKs/MacOSX13.1.sdk/System/Library/Frameworks/OpenCL.framework/");
         exe.linkFramework("OpenCL");
         exe.linkSystemLibrary("tiff");
         exe.linkSystemLibrary("SDL2");
@@ -28,15 +29,20 @@ pub fn build(b: *Builder) void {
     {
 
         // const exe = b.addTest("biopencil-test", "src/biopencil.zig");
-        const exe = b.addTest(.{ .kind = .test_exe, .root_source_file = .{ .path = "src/biopencil.zig" } });
+        const exe = b.addTest(.{ .kind = .test_exe, .root_source_file = .{ .path = "src/opencl-maxproj.zig" } });
         // exe.addLibraryPath("/usr/local/lib"); (automatically linked ???)
-        exe.addIncludePath("/usr/local/include/"); // tiff.h (required)
-        exe.addIncludePath("libs/include/"); // CL/opencl.h
+        // exe.addIncludePath("/usr/local/include/"); // tiff.h (required)
+        // exe.addIncludePath("libs/include/"); // CL/opencl.h
         exe.linkFramework("OpenCL");
-        exe.linkSystemLibrary("tiff");
-        exe.linkSystemLibrary("SDL2");
+        // exe.linkSystemLibrary("tiff");
+        // exe.linkSystemLibrary("SDL2");
+        // exe.setFilter("test DevCtxQueProg");
+        // exe.setFilter("test dcqp basic kernel");
         // exe.setFilter("test read write loops");
         // exe.setFilter("test TIFF vs raw speed");
+        exe.setFilter("buffer");
+        // exe.setFilter("writefloatbuffer");
+        // exe.setFilter("mandelbrot");
         exe.install();
     }
 }

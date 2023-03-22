@@ -5,9 +5,10 @@ const ocl = @import("std").opencl;
 pub fn main() !void {
     const num_elements: usize = 1000;
     var arr: [num_elements]u32 = undefined;
+    std.debug.print("hello world\n\n", .{});
 
     // Initialize array with random data
-    for (arr) |*element| {
+    for (&arr) |*element| {
         element.* = @as(u32, std.rand.uniform(0, 100));
     }
 
@@ -50,5 +51,5 @@ pub fn main() !void {
     try ocl.enqueueReadBuffer(&queue, &result_buffer, true, 0, result_size, &result);
 
     // Print result
-    std.log.info("{d}\n", .{result});
+    std.debug.print("{d}\n", .{result});
 }

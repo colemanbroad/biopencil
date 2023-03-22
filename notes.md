@@ -83,6 +83,32 @@ When data is too thick we should be able to narrow the volume through which we p
 This volume should be easily customizable and draggable through the full volume.
 This also makes computing the projection easier as we make the volume smaller.
 
+# BUG: CL_INVALID_KERNEL (Sat Mar 18, 2023)
+
+How am i going to debug this?
+I can build the program, but there is an error in `clCreateKernel()`.
+When I adjust the kernel to have the same arguments, but not to use them, then I don't have this error.
+I'll make a minimal function that prints out the values of passed function parameters.
+This tells me that I can print all the args up through `colormap` just fine, but from `Nx` onwards I get the error.
+One theory is I'm passing a pointer when I should be passing a value to `setKerelArgs()`. 
+Is it ever OK to pass a value ?
+Another is that I'm passing a pointer to memory with shorter lifetime than my kernel...
+If I want to pass a value like `[1000]u8` to the GPU do I need to put that data into a buffer?
+Or can I simply pass it as a value.
+Well, `[1000]u8` doesn't exist as a value in `C`! So, you have to allocate, and pass them around as `*u8` pointers.
+But for structs that hold actual `C` values I should be able to pass these around no problem...
+
+But I have been able to pass around `colormap` without using buffers in the past!
+How did my kernel have any idea how large an array `colormap` was? How did it know how much data to pass to the GPU?
+
+?? There are no bounds checks on buffers passed into OpenCL ??
+The kernel may be valid / invalid depending on whether or not I print one of the parameters?
+That's insane. Why can't it just type check at the boundaries properly?
+What about using a different GPU programming tool instead of OpenCL 1.2...
+
+
+
+
 
 
 # Performance / Profiling
@@ -204,6 +230,57 @@ res = (x**2 - 3)(x**2 + 3)
 a = x**2
 res = (a-3)(a+3)
 ```
+
+## OpenCL interaction architecture
+
+
+At the momenet all the app logic and interfacing with opencl lives in biopencil.
+This is fine, but I think the opencl logic is really quite distinct and probably too generic.
+We really just want a way to call the max projection kernel.
+This will require a setup() / init() function to get the (devi, ctx, cmd_q, prog, kernel), build the buffers
+and enquqe all the args. Since we're only doing this for one function we may as well only do it one time.
+Then we'll need a second function which takes the Kernel object with all it's state and renders into a buffer 
+of our choosing.
+
+# OpenCL Questions
+
+- what does `global float*` mean vs normal float pointer as kernel parameter? Global is required for global mem access.
+- why can't i create a readwrite buffer from a pointer i own and pass that to opencl successfully? the memory is zeroed out in the buffer somehow...
+I could try all combinations.....
+
+
+I've got it narrowed down to a very small test case. 
+1. Using C I can run kernels which take a buffer and a non-buffer as arguments and successfully write to the buffer.
+2. I can translate this to ZIG with `translate-c` and it runs exactly the same, so I know that passing normal args via `&number` works in zig even when I cast to `?*const anyopaque`.
+The remaining possible causes for the error `error.CL_INVALID_KERNEL` returned from `clCreateKernel()` cannot be related to the later calls like `cl.clSetKernelArg(kernel, i_argnum, @sizeOf(cl.cl_mem), @ptrCast(?*anyopaque, &buffers_1))`...
+It must be related to the actual kernel source... Maybe it doesn't type check? But this would be a problem 
+during `buildProgram()`... 
+3. Now I can run kernels that write to buffers, but I can't print when the buffer is called? This is strange.
+      PRINTING IS ERRATIC. It doesn't work with regularity.
+      IT WAS THE PROBLEM. PERFECTLY GOOD KERNELS WILL THROW `OPENCL ERROR: -48 ERROR.CL_INVALID_KERNEL` 
+      WHENEVER THEY HAVE A CALL `PRINTF()`, BUT AT RANDOM. SOMETIMES THEY WORK PERFECTLY! INSANE.
+      I also get the `-48` error `UNSUPPORTED (log once): createKernel: newComputePipelineState failed` 
+      with `zig run gpt-opencl-simple-2.c.zig -framework OpenCL` whenver I use two calls
+      to printf in the kernel... This is the same failure mode! This is entirely an OpenCL 1.2 on macos 12 issue.
+
+
+## How should one debug OpenCL ?
+
+Or any highly parallel GPU code? 
+On the CPU lldb gives you the ability to jump between threads, and each thread has it's own callstack.
+The GPU is the same, it's just that it has thousands of threads instead of 16... Why doesn't it provide the same
+interface?
+
+If this isn't possible, and it's not possible to do printf debugging anymore on macos 12, then how can we debug kernels?
+MAC must provide good kernel debugging tools for metal.
+
+And there must be a way for me to use them from zig...
+What about webgpu? I think it's syntax looks like metal. does google's DAWN also provide good debugging tools?
+I think the endgame is either using metal directly + SDL, or Metal + sokol bindings.
+WebGPU ...
+
+
+
 
 
 # comptime vs runtime polymorphism
