@@ -616,6 +616,9 @@ pub fn main() !u8 {
     };
     print("mima of d_output.img {any}\n", .{mima2});
 
+    // Do first rendering
+    try mp.reexecuteKernel(dcqp, grey, d_output, d_zbuffer, view);
+
     // Update window
     const err = loops.load("loopfile.loops");
     if (err) |_| {
