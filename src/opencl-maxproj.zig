@@ -230,21 +230,22 @@ pub fn getClDevice() MyCLError!cl.cl_device_id {
         if (cl.clGetPlatformInfo(id, cl.CL_PLATFORM_NAME, name.len, &name, &name_len) != cl.CL_SUCCESS) {
             return MyCLError.GetPlatformInfoFailed;
         }
-        print("platform {}: {s}\n", .{ i, name[0..name_len] });
+        _ = i;
+        // print("platform {}: {s}\n", .{ i, name[0..name_len] });
     }
 
     if (platform_count == 0) {
         return MyCLError.NoPlatformsFound;
     }
 
-    print("choosing platform 0...\n", .{});
+    // print("choosing platform 0...\n", .{});
 
     var device_ids: [16]cl.cl_device_id = undefined;
     var device_count: cl.cl_uint = undefined;
     if (cl.clGetDeviceIDs(platform_ids[0], cl.CL_DEVICE_TYPE_ALL, device_ids.len, &device_ids, &device_count) != cl.CL_SUCCESS) {
         return MyCLError.GetDevicesFailed;
     }
-    print("{} cl device(s) found on platform 0:\n", .{@intCast(u32, device_count)});
+    // print("{} cl device(s) found on platform 0:\n", .{@intCast(u32, device_count)});
 
     for (device_ids[0..device_count], 0..) |id, i| {
         var name: [1024]u8 = undefined;
@@ -252,14 +253,15 @@ pub fn getClDevice() MyCLError!cl.cl_device_id {
         if (cl.clGetDeviceInfo(id, cl.CL_DEVICE_NAME, name.len, &name, &name_len) != cl.CL_SUCCESS) {
             return MyCLError.GetDeviceInfoFailed;
         }
-        print("  device {}: {s}\n", .{ i, name[0..name_len] });
+        _ = i;
+        // print("  device {}: {s}\n", .{ i, name[0..name_len] });
     }
 
     if (device_count == 0) {
         return MyCLError.NoDevicesFound;
     }
 
-    print("choosing device 0...\n", .{});
+    // print("choosing device 0...\n", .{});
 
     return device_ids[0];
 }
@@ -297,10 +299,15 @@ pub const DevCtxQueProg = struct {
         try err(ecode);
 
         // Load Source from .cl files and coerce into null terminated c-style pointers.
-        const cwd = try std.fs.cwd().openDir("src", .{});
+        var cwd = try std.fs.cwd().openDir("src", .{});
+        defer cwd.close();
+
         var prog_source = try al.alloc([:0]u8, files.len);
         defer al.free(prog_source);
-        inline for (files, 0..) |name, i| prog_source[i] = try cwd.readFileAllocOptions(al, name, 20_000, null, @alignOf(u8), 0);
+        inline for (files, 0..) |name, i| {
+            prog_source[i] = try cwd.readFileAllocOptions(al, name, 20_000, null, @alignOf(u8), 0);
+            // defer al.free(prog_source[i]);
+        }
         defer inline for (files, 0..) |_, i| al.free(prog_source[i]);
         var program = cl.clCreateProgramWithSource(ctx, @intCast(cl.cl_uint, files.len), @ptrCast([*c][*c]const u8, prog_source), null, &ecode);
         try err(ecode);
@@ -330,7 +337,7 @@ pub const DevCtxQueProg = struct {
             .program = program,
         };
 
-        print("dcqp =\n\n {any} \n\n", .{dcqp});
+        // print("dcqp =\n\n {any} \n\n", .{dcqp});
         return dcqp;
     }
 
@@ -1031,8 +1038,8 @@ pub fn buildKernelMaxProj(
 }
 
 pub fn reexecuteKernel(
-    // al: std.mem.Allocator,
-    dcqp: DevCtxQueProg,
+    al: std.mem.Allocator,
+    _dcqp: ?DevCtxQueProg,
     grey: im.Img3D(f32),
     d_output: im.Img2D([4]u8),
     d_zbuffer: im.Img2D(f32),
@@ -1041,6 +1048,17 @@ pub fn reexecuteKernel(
     // _ = al;
     // const files = &[_][]const u8{"volumecaster.cl"};
     // var dcqp = try DevCtxQueProg.init(al, files);
+
+    var dcqp: DevCtxQueProg = undefined;
+    if (_dcqp) |val| {
+        dcqp = val;
+    } else {
+        const files = &[_][]const u8{"volumecaster.cl"};
+        // const files = &{"volumecaster.cl"};
+        dcqp = try DevCtxQueProg.init(al, files);
+    }
+
+    defer if (_dcqp == null) dcqp.deinit();
 
     var img_cl = try img2CLImg(grey, dcqp);
     const volume_dims = [3]u16{ @intCast(u16, grey.nx), @intCast(u16, grey.ny), @intCast(u16, grey.nz) };

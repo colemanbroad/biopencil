@@ -1,3 +1,8 @@
+
+// This doesn't help... still can only printf once per thread.
+// #pragma OPENCL EXTENSION cl_amd_printf : enable
+
+
 /*
 
   Volume ray casting kernel
@@ -84,12 +89,12 @@ typedef struct {
 }  View ; 
 
 void printview(View v) {
-  printf("view matrix \n" , v.view_matrix);
-  for (int i=0;i<9;i++) {printf("%2.2f ",v.view_matrix[i]);}
-  printf("\nfront_scale %2.2v3hlf \n" , v.front_scale);
-  printf("back_scale %2.2v3hlf" , v.back_scale);
-  printf("anisotropy %2.2v3hlf  \n" , v.anisotropy);
-  printf("screen_size %3v2d \n" , v.screen_size);
+  printf("view matrix \n");
+  // for (int i=0;i<9;i++) {printf("%2.2f ",v.view_matrix[i]);}
+  // printf("\nfront_scale %2.2v3hlf \n" , v.front_scale);
+  // printf("back_scale %2.2v3hlf" , v.back_scale);
+  // printf("anisotropy %2.2v3hlf  \n" , v.anisotropy);
+  // printf("screen_size %3v2d \n" , v.screen_size);
 }
 
 typedef struct {
@@ -99,7 +104,7 @@ typedef struct {
 
 void printray(Ray r) {
   printf("orig %2.2v3hlf \n",  r.orig);
-  printf("direc %2.2v3hlf \n", r.direc);
+  // printf("direc %2.2v3hlf \n", r.direc);
 }
 
 
@@ -138,7 +143,7 @@ __kernel void max_project_float(
                   ushort3 volume_dims
                 )
 {
-
+  
   // clip boxes [normalized volume coords]
   float boxMin_x  = -1.0;
   float boxMax_x  =  1.0;
@@ -175,10 +180,11 @@ __kernel void max_project_float(
   // d_output[idx] = maxxy;
   // return; 
 
-  // if (idx==0) {
-  //   printview(view);
-  //   // printray(r);
-  // }
+  if (idx==0) {
+    // printf("theta = %f \n", view.theta);
+    // printview(view);
+    // printray(r);
+  }
 
   // Clipping Boxes with domain [-1..1]
   float3 boxMin = (float3){boxMin_x,boxMin_y,boxMin_z};
@@ -191,7 +197,7 @@ __kernel void max_project_float(
   // if (idx==181248) {printray(r);}
   
   if (!hit) {
-    d_output[idx] = (uchar4){0,0,0,255};
+    d_output[idx] = (uchar4){75,75,0,255};
     return;
   }
 

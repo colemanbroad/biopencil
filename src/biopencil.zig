@@ -574,50 +574,12 @@ pub fn main() !u8 {
 
     // var renderer = try mp.buildKernelMaxProj(temp_allo, grey, d_output, d_zbuffer, view);
 
-    const files = &[_][]const u8{"volumecaster.cl"};
-    var dcqp = try mp.DevCtxQueProg.init(temp_allo, files);
-
-    // var img_cl = try mp.img2CLImg(grey, dcqp);
-    // const volume_dims = [3]u16{ @intCast(u16, grey.nx), @intCast(u16, grey.ny), @intCast(u16, grey.nz) };
-    // const volume_total: u64 = grey.nx * grey.ny * grey.nz;
-    // _ = volume_total;
-    // const colormap = mp.cmapCool();
-    // const nnx = d_output.nx;
-    // const nny = d_output.ny;
-    // const mima = im.minmax(f32, grey.img);
-    // print("mima = {d}\n", .{mima});
-
-    // var args = .{
-    //     img_cl,
-    //     d_output.img,
-    //     d_zbuffer.img,
-    //     colormap,
-    //     nnx,
-    //     nny,
-    //     mima,
-    //     view,
-    //     volume_dims,
-    // };
-
-    // var kernel = try mp.KernelMP.init(dcqp, args);
-    // // return .{ .dcqp = dcqp, .kern = kernel, .args = args };
-    // var renderer = mp.KernelStateMaxProject{ .dcqp = dcqp, .kern = kernel, .args = args };
-
-    const mima2 = blk: {
-        var mn = [4]u8{ 0, 0, 0, 0 };
-        var mx = [4]u8{ 0, 0, 0, 0 };
-        for (d_output.img) |v| {
-            for (v, 0..) |vi, i| {
-                mn[i] = std.math.min(mn[i], vi);
-                mx[i] = std.math.max(mx[i], vi);
-            }
-        }
-        break :blk .{ .mn = mn, .mx = mx };
-    };
-    print("mima of d_output.img {any}\n", .{mima2});
+    // const files = &[_][]const u8{"volumecaster.cl"};
+    // var dcqp = try mp.DevCtxQueProg.init(temp_allo, files);
+    // _ = dcqp;
 
     // Do first rendering
-    try mp.reexecuteKernel(dcqp, grey, d_output, d_zbuffer, view);
+    try mp.reexecuteKernel(temp_allo, null, grey, d_output, d_zbuffer, view);
 
     // Update window
     const err = loops.load("loopfile.loops");
@@ -739,7 +701,7 @@ pub fn main() !u8 {
                     if (app_mouse.mousedown == false) break :blk;
 
                     const px = @intCast(u31, clip(event.motion.x, 0, nx));
-                    const py = @intCast(u31, clip(event.motion.y, 0, ny)); // TODO ERROR: panic: attempt to cast negative value to unsigned integer
+                    const py = @intCast(u31, clip(event.motion.y, 0, ny));
 
                     // should never be null, we've already asserted `mousedown`
                     assert(app_mouse.mouse_location != null);
@@ -808,9 +770,7 @@ pub fn main() !u8 {
         windy.update_count += 1;
 
         // perform the render and update the window
-        // args = .{ img_cl.?, d_output.img, d_zbuffer.img, colormap, &nx, &ny, &mima, &view, &volume_dims };
-        // try mp.reexecuteKernel(view);
-        try mp.reexecuteKernel(dcqp, grey, d_output, d_zbuffer, view);
+        try mp.reexecuteKernel(temp_allo, null, grey, d_output, d_zbuffer, view);
         // try blurfilter(gpa.allocator(), d_zbuffer);
 
         addBBox(d_output, view);
@@ -884,6 +844,7 @@ const V3 = @Vector(3, f32);
 const V2 = @Vector(2, f32);
 const U2 = @Vector(2, u32);
 
+// WARNING: OpenCL Requires `extern` and crashes without it.
 pub const View = extern struct {
     view_matrix: [9]f32, // orthonormal
     front_scale: V3,

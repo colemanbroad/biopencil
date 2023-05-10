@@ -34,7 +34,7 @@ This is more powerful representation than the previous `view_angles:[2]f32` mode
 which required a view_angles → rotation matrix transformation (`rotmatFromAngles()`), but we could update view_angles by 
 simply adding a scalar value. 
 
-- [x] use `setPixels()` for faster surface blitting.
+-[x] use `setPixels()` for faster surface blitting.
 - Q: how to draw only on sub rectangle?
 
 
@@ -106,6 +106,25 @@ The kernel may be valid / invalid depending on whether or not I print one of the
 That's insane. Why can't it just type check at the boundaries properly?
 What about using a different GPU programming tool instead of OpenCL 1.2...
 
+- why can't i create a readwrite buffer from a pointer i own and pass that to opencl successfully? the memory is zeroed out in the buffer somehow...
+I could try all combinations.....
+
+I've got it narrowed down to a very small test case. 
+1. Using C I can run kernels which take a buffer and a non-buffer as arguments and successfully write to the buffer.
+2. I can translate this to ZIG with `translate-c` and it runs exactly the same, so I know that passing normal args via `&number` works in zig even when I cast to `?*const anyopaque`.
+The remaining possible causes for the error `error.CL_INVALID_KERNEL` returned from `clCreateKernel()` cannot be related to the later calls like `cl.clSetKernelArg(kernel, i_argnum, @sizeOf(cl.cl_mem), @ptrCast(?*anyopaque, &buffers_1))`...
+It must be related to the actual kernel source... Maybe it doesn't type check? But this would be a problem 
+during `buildProgram()`... 
+3. Now I can run kernels that write to buffers, but I can't print when the buffer is called? This is strange.
+      PRINTING IS ERRATIC. It doesn't work with regularity.
+      IT WAS THE PROBLEM. PERFECTLY GOOD KERNELS WILL THROW `OPENCL ERROR: -48 ERROR.CL_INVALID_KERNEL` 
+      WHENEVER THEY HAVE A CALL `PRINTF()`, BUT AT RANDOM. SOMETIMES THEY WORK PERFECTLY! INSANE.
+      I also get the `-48` error `UNSUPPORTED (log once): createKernel: newComputePipelineState failed` 
+      with `zig run gpt-opencl-simple-2.c.zig -framework OpenCL` whenver I use two calls
+      to printf in the kernel... This is the same failure mode! This is entirely an OpenCL 1.2 on macos 12 issue.
+      OK, I've narrowed down the problem even further... Printing only works THE FIRST TIME it's called in any kernel thread! Trying to print twice causes an INVALID KERNEL crash. But with live reload we can toggle which printf is active and transition between them easitly.
+
+
 
 
 
@@ -140,10 +159,10 @@ makes it look like we spend all our time _reading out data_, when in fact it's e
 
 Make sure we can open:
 
-- [x] multiple bit depth
-- [x] uint,int,float
-- [ ] multiple samples per pixel (channels)
-- [ ] 2D/3D/4D (time)
+-[x] multiple bit depth
+-[x] uint,int,float
+-[ ] multiple samples per pixel (channels)
+-[ ] 2D/3D/4D (time)
 
 
 Reading from TIFF is slower than reading from RAW using `Img3D.load()`.
@@ -167,7 +186,7 @@ const app = struct {
       ...
 };
 ```
-This would 
+
 
 
 ```
@@ -210,8 +229,6 @@ View must be global?
 
 # Architecture and control flow
 
-- Why is updating loop.temp... allowed ?
-- Can i edit namespaced vars from a method i.e. loops.method() ?
 - Model / View style or mixed view and control style?
   
   Model / View style requires that I have separate control flow (1) for updating my model(input) and (2) for updating my view(model).
@@ -244,30 +261,14 @@ of our choosing.
 
 # OpenCL Questions
 
-- what does `global float*` mean vs normal float pointer as kernel parameter? Global is required for global mem access.
-- why can't i create a readwrite buffer from a pointer i own and pass that to opencl successfully? the memory is zeroed out in the buffer somehow...
-I could try all combinations.....
-
-
-I've got it narrowed down to a very small test case. 
-1. Using C I can run kernels which take a buffer and a non-buffer as arguments and successfully write to the buffer.
-2. I can translate this to ZIG with `translate-c` and it runs exactly the same, so I know that passing normal args via `&number` works in zig even when I cast to `?*const anyopaque`.
-The remaining possible causes for the error `error.CL_INVALID_KERNEL` returned from `clCreateKernel()` cannot be related to the later calls like `cl.clSetKernelArg(kernel, i_argnum, @sizeOf(cl.cl_mem), @ptrCast(?*anyopaque, &buffers_1))`...
-It must be related to the actual kernel source... Maybe it doesn't type check? But this would be a problem 
-during `buildProgram()`... 
-3. Now I can run kernels that write to buffers, but I can't print when the buffer is called? This is strange.
-      PRINTING IS ERRATIC. It doesn't work with regularity.
-      IT WAS THE PROBLEM. PERFECTLY GOOD KERNELS WILL THROW `OPENCL ERROR: -48 ERROR.CL_INVALID_KERNEL` 
-      WHENEVER THEY HAVE A CALL `PRINTF()`, BUT AT RANDOM. SOMETIMES THEY WORK PERFECTLY! INSANE.
-      I also get the `-48` error `UNSUPPORTED (log once): createKernel: newComputePipelineState failed` 
-      with `zig run gpt-opencl-simple-2.c.zig -framework OpenCL` whenver I use two calls
-      to printf in the kernel... This is the same failure mode! This is entirely an OpenCL 1.2 on macos 12 issue.
+Q: What does `global float*` mean vs normal float pointer as kernel parameter? 
+A: Global is required for global mem access.
 
 
 ## How should one debug OpenCL ?
 
 Or any highly parallel GPU code? 
-On the CPU lldb gives you the ability to jump between threads, and each thread has it's own callstack.
+On the CPU LLDB gives you the ability to jump between threads, and each thread has it's own callstack.
 The GPU is the same, it's just that it has thousands of threads instead of 16... Why doesn't it provide the same
 interface?
 
@@ -279,11 +280,28 @@ What about webgpu? I think it's syntax looks like metal. does google's DAWN also
 I think the endgame is either using metal directly + SDL, or Metal + sokol bindings.
 WebGPU ...
 
+Some [research](https://stackoverflow.com/questions/2362186/debugger-for-opencl) shows multiple options for OpenCL debuggers, however I'm not sure they are active.
+
+The other recommended approaches are [printf debugging]() and [color debugging](https://computergraphics.stackexchange.com/questions/96/how-can-i-debug-glsl-shaders)
+Macos and XCode has a [fully featured debugger](https://developer.apple.com/documentation/metal/developing_and_debugging_metal_shaders), but it's MacOS / Metal specific.
+
+[Renderdoc](https://renderdoc.org/docs/how/how_debug_shader.html) is an alternative for Vulkan and DX3D. 
+The simplest thing is to use printf (one at a time) and color debugging.
 
 
 
 
-# comptime vs runtime polymorphism
+
+## Debugging max projection (Wed Mar 22, 2023)
+
+The perspective projection is pure black, but the early-returning orthogonal projection shows the
+correct image. This means there is a bug in the perspective projection code (which hasn't changed) 
+or some of the parameters we're passing in are wrong... It was the packing of the struct! This was an easy
+fix that I purely guessed... changing `struct View {}` to `extern struct View {}` was the entire fix.
+
+
+
+# comptime vs runtime polymorphism (#abstract)
 
 How many times does your code need to pass through the compiler beofore it is executable by machine?
 running commands that have already been compiled. Each command is a small program.
@@ -335,20 +353,20 @@ This is annoying. If all our code uses generic interfaces, then we rarely jump t
 
 When we compile down to an executable object file there are `.text` (code) and `.data` sections...
 
-- [github: vtables in zig? ](https://github.com/ziglang/zig/issues/130)
-- [github: comptime interfaces in zig](https://github.com/ziglang/zig/issues/1268)
-- [tutorial: dynamic polymorphism in zig](https://revivalizer.xyz/post/the-missing-zig-polymorphism-reference/)
-- [github: Alex Nask's Interface code](https://github.com/alexnask/interface.zig)
-- [gist: Alex Nask's Interface code (OLD)](https://gist.github.com/alexnask/1d39fbc01b42ce2b5b628828b6d1fb46)
-- [Alex Nask's YouTube talk](https://www.youtube.com/watch?v=AHc4x1uXBQE&ab_channel=ZigSHOWTIME)
+-[github: vtables in zig? ](https://github.com/ziglang/zig/issues/130)
+-[github: comptime interfaces in zig](https://github.com/ziglang/zig/issues/1268)
+-[tutorial: dynamic polymorphism in zig](https://revivalizer.xyz/post/the-missing-zig-polymorphism-reference/)
+-[github: Alex Nask's Interface code](https://github.com/alexnask/interface.zig)
+-[gist: Alex Nask's Interface code (OLD)](https://gist.github.com/alexnask/1d39fbc01b42ce2b5b628828b6d1fb46)
+-[Alex Nask's YouTube talk](https://www.youtube.com/watch?v=AHc4x1uXBQE&ab_channel=ZigSHOWTIME)
 
 So does this Interface approach to runtime polymorphism allow us to write _precompiled libraries_ that 
 have our Interface in the exposed API? Is this another advantage over functions which are generic taking an `anytype`?
 
-- [ ] fix the bug in `reference/interface.zig` that causes printing random memory.
+-[ ] fix the bug in `reference/interface.zig` that causes printing random memory.
 
 
-# Trees, Graphs, and Perfect Hash
+# Trees, Graphs, and Perfect Hash (#abstract)
 
 Arrays are just efficiently packed perfect hash of positive integers.
 The positive ints written in binary of length N are a description of a path down a binary tree to a node at layer N.
@@ -461,7 +479,6 @@ Idea to use spherical coordinates from [here](https://quaternions.online/).
 R/gamedev also recommends spherical coords [here](https://www.reddit.com/r/gamedev/comments/16zejj/3d_camera_orbit_drag_zoom/).
 NOTE: the spherical coords phi/theta system is like roll/pitch/yaw . 
 
-
 But I wrote `R(theta,phi)` by manually taking derivatives of the following system:
 This equates theta with "yaw" and phi with "pitch".
 
@@ -480,11 +497,11 @@ r_z =         -sin(theta) * cos(phi), -sin(phi),   cos(theta) * cos(phi)
 ```
 
 
-# Building and Dependencies
+# Building and Dependencies (#debug)
 
 Starting out, I thought this was a ZIG problem, but now I know it's really a MACOS problem.
 
-I'd like to build a static version of `bioviewer` that works on other systems running macos-x86_64.
+I'd like to build a static version of that works on other systems running macos-x86_64.
 Brew installs static libraries (`.a`) in addition to dynamic (`.dylib`). 
 But linking against them is not as simple as replacing `linkSystemLibrary` with `addObjectFile`.
 
@@ -492,10 +509,12 @@ My [github search](https://cs.github.com/?scopeName=All+repos&scope=&q=lang%3Azi
 1. linking `*.a` requires explicitly including transitive deps
 2. linking SDL2 on macos is usually done using brew and dynamic linking.
 
-**I could include run some brew commands as a part of build!**
-But this sounds scary. I don't want to mess up my user's brew system!
+Solutions
+1. run some brew commands to install SDL as a part of build
+      But this sounds scary. I don't want to mess up my user's brew system. 
+2. download SDL with curl and install to local folder
 
-Attempting to build now reveals a littany of missing symbols during linking...
+Attempting to build now reveals a littany of missing symbols during linking:
 ```
 error(link): undefined reference to symbol '_objc_sync_enter'
 error(link):   first referenced in '/usr/local/Cellar/sdl2/2.0.14_1/lib/libSDL2.a(SDL_cocoawindow.o)'
@@ -513,25 +532,25 @@ But these are only our direct dependencies!
 We can use otool recursively [via python](https://stackoverflow.com/questions/1517614/using-otool-recursively-to-find-shared-libraries-needed-by-an-app) (see `detect_dylibs.py`), but in pracitce it was easier to do this manually...
 This reveals 2nd order deps: `libjpeg.8.dylib` and `libz.1.dylib`.
 
-- [dealing with iconv](https://stackoverflow.com/questions/57734434/libiconv-or-iconv-undefined-symbol-on-mac-osx)
+-[dealing with iconv](https://stackoverflow.com/questions/57734434/libiconv-or-iconv-undefined-symbol-on-mac-osx)
 
 Some of these deps live in macos Frameworks, e.g. `Cocoa`.
 I can static link `libjpeg` and dynamic link (a lot of) Frameworks.
 This in theory allows distributing binaries that don't require installing 3rd party libs.
 
-__But I'm not using these dependencies!__
+But I'm not using these dependencies!
 Unnecessary dependencies shrink viable set of target systems.
 
-Q1: Is there a way to static build that avoids unnecessary dependencies?
+Q: Is there a way to static build that strips unused transitive dependencies?
 
-- [How to remove unused C/C++ symbols with GCC and ld?](https://stackoverflow.com/questions/6687630/how-to-remove-unused-c-c-symbols-with-gcc-and-ld)
-- [Remove dead code when linking static library into dynamic library](https://stackoverflow.com/questions/50881619/remove-dead-code-when-linking-static-library-into-dynamic-library)
+-[How to remove unused C/C++ symbols with GCC and ld?](https://stackoverflow.com/questions/6687630/how-to-remove-unused-c-c-symbols-with-gcc-and-ld)
+-[Remove dead code when linking static library into dynamic library](https://stackoverflow.com/questions/50881619/remove-dead-code-when-linking-static-library-into-dynamic-library)
 - 
 
-Q2: Does building from source allow me to avoid these dependencies?
+Q: Does building from source allow me to avoid these dependencies?
 
-- [attempting backwards compatibility on macos despite dynamic linking](https://stackoverflow.com/questions/15091105/confusion-of-how-to-make-osx-app-backward-compatible-how-to-test-them)
-- [why don't people vendor SDL2?](https://www.reddit.com/r/gamedev/comments/o5qrao/sdl2_is_zlib_licensed_but_why_its_not_included_in/)
+-[attempting backwards compatibility on macos despite dynamic linking](https://stackoverflow.com/questions/15091105/confusion-of-how-to-make-osx-app-backward-compatible-how-to-test-them)
+-[why don't people vendor SDL2?](https://www.reddit.com/r/gamedev/comments/o5qrao/sdl2_is_zlib_licensed_but_why_its_not_included_in/)
 
 ## Static linking on OSX is discouraged
 
@@ -539,7 +558,7 @@ Apparently [it is common](https://stackoverflow.com/questions/844819/how-to-stat
 [Pure static linking including all Frameworks is not possible.](https://developer.apple.com/library/archive/qa/qa1118/_index.html)
 
 
-## Modal Editing
+# Modal Editing
 
 Proposed Modes
 
@@ -558,44 +577,55 @@ This is in addition to modes for tasks like tracking, segmentation, spot countin
 Different image semantics: nuclear marker, membrane marker, u16 object labels, pixelwise labels, 
 generic fluorescence, histology rgb?
 
-### Tracking Mode
+## Tracking Mode
 
-- [ ] allow object to occlude tracking tails
-- [ ] manual tracking annotation in max projection view uses smart depth inference
-- [ ] extend tracks by dragging mouse with right hand and tapping "space" with left to advance time point.
-      - [ ] use same workflow for moving bounding boxes through time.
+-[ ] allow object to occlude tracking tails
+-[ ] manual tracking annotation in max projection view uses smart depth inference
+-[ ] extend tracks by dragging mouse with right hand and tapping "space" with left to advance time point.
+      -[ ] use same workflow for moving bounding boxes through time.
 
+### Tracking tails occlusion
+
+If we return both the perspective projection AND the z-depth buffer from our kernel then we can add tails
+to objects in the same way that we add loops, but whenever the tail/loop pixel drawn has a 3D coordinate that is behind 
 
 
 # Features
 
-- [x] two rotation angles
-- [x] box around border
-- [x] dragging with cursor
-- [x] drawing with fw/bw 3D map 
-- [x] proper window size. has a max width, but otherwise is h/w proportional to x,y image size. anisotropy interpreted from image.
-- [x] connect two windows via draggable box
-- [ ] branch early on `mode` . move logic into mode-specific trees.
-- [ ] save anno to disk
-- [ ] Scroll through time. Live load of new data from disk / mem.
-- [ ] REPL interface with autocomplete to adjust params. access nested, internal structs. interactive.
-- [ ] colors: smoother color pallete...
-- [ ] semantic labels for objects, object selection and manipulation, colors based on object label.
-- [ ] add text labels pointing to objects that follow them over time and during view manipulation, rotation, etc.
-- [ ] Loops and BoundingBox partial occlusion by nuclei
-- [ ] #perf Allow window resize without changing the cost of opencl projection (keep number of rays small), then upscale them efficiently (maybe also on GPU?) related to kernel chaining?!
-- [ ] #perf Dynamically adjust the quality of depth rendering while view is updating. (lower density sampling in X,Y,and Z) Still shots get higher quality?
-
+-[x] two rotation angles
+-[x] box around border
+-[x] dragging with cursor
+-[x] drawing with fw/bw 3D map 
+-[x] proper window size. has a max width, but otherwise is h/w proportional to x,y image size. anisotropy interpreted from image.
+-[x] connect two windows via draggable box
+-[ ] branch early on `mode` . move logic into mode-specific trees.
+-[x] save anno to disk
+-[ ] Scroll through time. Live load of new data from disk / mem.
+-[ ] REPL interface with autocomplete to adjust params. access nested, internal structs. interactive.
+-[ ] colors: smoother color pallete...
+-[ ] semantic labels for objects, object selection and manipulation, colors based on object label.
+-[ ] add text labels pointing to objects that follow them over time and during view manipulation, rotation, etc.
+-[ ] Loops and BoundingBox partial occlusion by nuclei
+-[ ] #perf Allow window resize without changing the cost of opencl projection (keep number of rays small), then upscale them efficiently (maybe also on GPU?) related to kernel chaining?!
+-[ ] #perf Dynamically adjust the quality of depth rendering while view is updating. (lower density sampling in X,Y,and Z) Still shots get higher quality?
+-[ ] 
 
 
 ## Loading data
 
 Make sure we can open TIFF files with
 
-- [x] multiple bit depth
-- [x] uint,int,float
-- [ ] multiple samples per pixel (channels)
-- [ ] 2D/3D/4D (time)
+-[x] multiple bit depth
+-[x] uint,int,float
+-[ ] multiple samples per pixel (channels)
+-[ ] 2D/3D/4D (time)
+
+### Timeseries
+
+```zig
+
+```
+
 
 ## Drawing in 3D
 
@@ -615,28 +645,24 @@ but then are presented with a side view (orthogonal?) to control the depth by tr
 The surface is defined by the intersection of the two sheets defined by the two view's Rays. 
 Of course there may be multiple intersection points... We have to disambiguate them somehow.
 
-
 ## Easy 3D bounding box creation and extension in depth
 
 We want a _collections_ of rectangles / bboxes.
 - rendering during drawing and during rotation
-- [ ] move existing rectangles
-- [ ] live view updating in 2nd window
+-[ ] move existing rectangles
+-[ ] live view updating in 2nd window
 - Q: are they 2d or 3d ? 
-      - [ ] 3D required for volume rendering in 2nd window / 3D bbox annotations
-      - [ ] can infer 3D bbox from 2D using heuristics
-
-
-
+      -[ ] 3D required for volume rendering in 2nd window / 3D bbox annotations
+      -[ ] can infer 3D bbox from 2D using heuristics
 
 # Bugs
 
-- [ ] The rendering uses `maxSteps=30` which causes severe aliasing from undersampled depth dimension, but increasing causes severse slowdown.
-- [ ] `r.direc` needs rescaling by `view.anisotropy`. Use dot product?
-- [ ] make depth coloring use colors of equal luminance! blue is much darker than yellow!
-- [x] `/fisheye/training/ce_024/train_cp/pimgs/train1/pimg_211.tif`: "Sorry, can not handle images with IEEE floating-point samples."
+-[ ] The rendering uses `maxSteps=30` which causes severe aliasing from undersampled depth dimension, but increasing causes severse slowdown.
+-[ ] `r.direc` needs rescaling by `view.anisotropy`. Use dot product?
+-[ ] make depth coloring use colors of equal luminance! blue is much darker than yellow!
+-[x] `/fisheye/training/ce_024/train_cp/pimgs/train1/pimg_211.tif`: "Sorry, can not handle images with IEEE floating-point samples."
 
-## Invalid Kernel on M1 mac
+## Invalid Kernel on M1 mac [Solved]
 
 - Error: CL_INVALID_KERNEL
 - Hypothesis: I'm instantiating the kernel with invalid arguments that happen to type check properly
@@ -645,6 +671,8 @@ We want a _collections_ of rectangles / bboxes.
 
 # Zig Questions
 
+- Why is updating loop.temp... allowed ?
+- Can i edit namespaced vars from a method i.e. loops.method() ?
 - when to use `@as` vs `@intCast` ?
 
 
