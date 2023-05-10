@@ -1197,17 +1197,18 @@ test "test matVecMul33" {
 pub fn matMulNNRowFirst(comptime n: u8, comptime T: type, left: [n * n]T, right: [n * n]T) [n * n]T {
     var result: [n * n]T = .{0} ** (n * n);
     assert(n < 128);
-    comptime {
-        for (&result, 0..) |*c, k| {
-            var i = (k / n) * n;
-            var j = k % n;
-            var m = 0;
-            while (m < n) : (m += 1) {
-                c.* += left[i + m] * right[j + m * n];
-                // @compileLog(i+m, j+m*n);
-            }
+    // comptime {}
+
+    inline for (&result, 0..) |*c, k| {
+        comptime var i = (k / n) * n;
+        comptime var j = k % n;
+        comptime var m = 0;
+        inline while (m < n) : (m += 1) {
+            c.* += left[i + m] * right[j + m * n];
+            // @compileLog(i + m, j + m * n);
         }
     }
+
     return result;
 }
 
@@ -1356,4 +1357,3 @@ pub fn matFromVecs(v0: [3]f32, v1: [3]f32, v2: [3]f32) Mat3x3 {
 //         array[n - i - 1] = temp;
 //     }
 // }
-

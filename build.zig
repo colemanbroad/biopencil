@@ -23,13 +23,14 @@ pub fn build(b: *Builder) void {
         exe.linkFramework("OpenCL");
         exe.linkSystemLibrary("tiff");
         exe.linkSystemLibrary("SDL2");
-        exe.install();
+        b.installArtifact(exe);
     }
 
     {
 
         // const exe = b.addTest("biopencil-test", "src/biopencil.zig");
-        const exe = b.addTest(.{ .kind = .test_exe, .root_source_file = .{ .path = "src/opencl-maxproj.zig" } });
+        const exe = b.addTest(.{ .root_source_file = .{ .path = "src/opencl-maxproj.zig" }, .filter = "buffer" });
+
         // exe.addLibraryPath("/usr/local/lib"); (automatically linked ???)
         // exe.addIncludePath("/usr/local/include/"); // tiff.h (required)
         // exe.addIncludePath("libs/include/"); // CL/opencl.h
@@ -40,9 +41,9 @@ pub fn build(b: *Builder) void {
         // exe.setFilter("test dcqp basic kernel");
         // exe.setFilter("test read write loops");
         // exe.setFilter("test TIFF vs raw speed");
-        exe.setFilter("buffer");
+        // exe.setFilter("buffer");
         // exe.setFilter("writefloatbuffer");
         // exe.setFilter("mandelbrot");
-        exe.install();
+        b.installArtifact(exe);
     }
 }
