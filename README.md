@@ -1,6 +1,6 @@
 A tool that let's you draw with a 3D pencil on your bioimages.
 
-![Demo gif](demo.gif)
+![Demo gif](results/demo.gif)
 
 # to install
 
