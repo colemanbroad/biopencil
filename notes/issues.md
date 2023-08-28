@@ -218,7 +218,10 @@ should scale? Can we determine the voxel anisotropy and incorporate that?
 
 # Scroll through time
 
-Live load of new data from disk / mem.
+Live load of new data from disk / mem. Let's start off doing this with C.
+elegans dataset because we know it renders nicely. 
+
+
 
 # Editing collections of annotations
 
@@ -477,6 +480,17 @@ Dynamically adjust the quality of depth rendering while view is updating.
 Start with lower density of points in X,Y and longer step length (lower Z
 density). Then she image quality improves with time and still/stationary
 views get high quality rendering?
+
+# Compute percentiles of image
+
+# Use centerpoint picker to place rotation origin
+
+This way you can rotate and zoom around an arbitrary cell / object of your choosing. 
+
+
+
+
+
 
 
 

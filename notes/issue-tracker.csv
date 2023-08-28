@@ -31,5 +31,5 @@ ID,Type,Status,Description,Start,Found Commit,Finished
 30,feature,,Building portable binaries on mac,,,
 31,feature,,Open variety of file types,,,
 32,bug,,Severe aliasing on depth dimension,,,
-,,,,,,
+33,refac,,Move allocator out of ImageBase,,,
 ,,,,,,
